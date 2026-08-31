@@ -72,14 +72,27 @@ sudo apt install \
 
 ## Install
 
-### Graphical installer
+### Bootstrap installer
 
-This command installs the required packages, downloads the latest release, and
-opens the graphical installer:
+This command downloads the latest release and asks whether to install the
+graphical setup application or command-line tools only:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/veedy-dev/mcbe-gdk-installer/main/bootstrap.sh | bash
 ```
+
+The CLI choice skips GTK, Libadwaita, PyGObject, `qrencode`, `unzip`, and `7z`,
+does not create the installer GUI shortcut, and does not open the GUI. Install
+`unzip` and `7z` later if you use `easy-install.sh` with a game package.
+
+For unattended installation, select the mode explicitly:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/veedy-dev/mcbe-gdk-installer/main/bootstrap.sh |
+  bash -s -- --cli
+```
+
+Replace `--cli` with `--gui` to install the graphical setup application.
 
 ### Download the source
 
