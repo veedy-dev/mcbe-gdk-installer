@@ -25,6 +25,13 @@ GAMING_SERVICES_VALUE = "IgnoreVersionMismatch"
 
 _original_prepare = base.prepare
 _original_supervise = base.supervise
+_original_read_custom_engine_metadata = base.read_custom_engine_metadata
+
+
+def reviewed_custom_engine_metadata(root: Path):
+    """Expose custom metadata to auth logic only for a reviewed exact profile."""
+    metadata = _original_read_custom_engine_metadata(root)
+    return metadata if metadata and installed_engine_profile(root) else None
 
 
 def prepare(game_dir: Path) -> None:
@@ -66,7 +73,10 @@ def supervise(umu: Path, game: Path, arguments: list[str]) -> int:
                 )
 
 
-# base.main resolves these functions from its module globals at call time.
+# base.main and the original prepare function resolve these module globals at
+# call time, so unprofiled custom archives retain the stable authentication
+# behavior instead of silently disabling it.
+base.read_custom_engine_metadata = reviewed_custom_engine_metadata
 base.prepare = prepare
 base.supervise = supervise
 
