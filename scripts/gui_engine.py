@@ -7,10 +7,8 @@ import threading
 
 import gui as base
 from auth.engine_profiles import installed_engine_profile, read_custom_engine_metadata
-from updates import (
-    ENGINE_LOAD_MORE if False else ENGINE_SELECTION_FILE,
-)
 from updates import (  # noqa: E402
+    ENGINE_SELECTION_FILE,
     _apply_game_profile,
     _custom_engine_is_ready,
     fetch_custom_engine,
@@ -61,10 +59,11 @@ class Window(base.Window):
             None,
         )
         if selected_label is None:
-            if selected_value.startswith("https://"):
-                selected_label = "Custom GitHub engine"
-            else:
-                selected_label = selected_value
+            selected_label = (
+                "Custom GitHub engine"
+                if selected_value.startswith("https://")
+                else selected_value
+            )
             if selected_label not in entries:
                 entries.append(selected_label)
             values[selected_label] = selected_value
