@@ -161,11 +161,53 @@ class BootstrapInstallModeTest(unittest.TestCase):
             self.assertEqual(
                 (root / "launcher-args").read_text().splitlines(),
                 [
-                    "2",
+                    "3",
                     str(root / "share/mcbe-gdk-linux"),
                     str(root / "source"),
+                    "--gui",
                 ],
             )
+
+    def test_no_controlling_tty_defaults_to_gui_without_prompting(self):
+        repo = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = self._environment(root)
+            result = subprocess.run(
+                [repo / "bootstrap.sh"],
+                cwd=repo,
+                env=env,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                start_new_session=True,
+                check=True,
+            )
+
+            self.assertNotIn("Choose [1]", result.stdout)
+            self.assertIn("Opening MCBE GDK Installer", result.stdout)
+            self.assertEqual(
+                (root / "launcher-args").read_text().splitlines()[-1],
+                "--gui",
+            )
+
+    def test_conflicting_mode_flags_are_rejected(self):
+        repo = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = self._environment(root)
+            result = subprocess.run(
+                [repo / "bootstrap.sh", "--gui", "--cli"],
+                cwd=repo,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("Choose only one install mode", result.stderr)
+            self.assertFalse((root / "gui-launched").exists())
 
 
 if __name__ == "__main__":
