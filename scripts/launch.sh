@@ -209,7 +209,8 @@ cleanup_launch() {
 trap cleanup_launch EXIT
 trap 'exit 130' HUP INT TERM
 
-(cd "$CONTENT" && python3 "$UMU" "$GAME" "$@") >> "$LOG" 2>&1
+
+python3 "$RUNTIME" supervise "$UMU" "$GAME" "$@" >> "$LOG" 2>&1
 rc=$?
 cleanup_launch
 trap - EXIT HUP INT TERM

@@ -48,7 +48,7 @@ class CliTest(unittest.TestCase):
                 [command, "help"], env=env, capture_output=True, text=True
             )
             self.assertIn("update", help_result.stdout)
-            self.assertIn("engine [VERSION]", help_result.stdout)
+            self.assertIn("engine [ENGINE]", help_result.stdout)
             self.assertIn("setup-env", help_result.stdout)
 
             (root / "lib/updates.py").write_text(

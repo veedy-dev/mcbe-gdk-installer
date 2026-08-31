@@ -7,17 +7,19 @@ from collections.abc import Mapping
 
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import time
-import webbrowser
 from pathlib import Path
+from threading import Event, Thread
 
 ROOT = Path(os.environ["MCBE_GDK_ROOT"]).expanduser().resolve()
 os.environ["BOL_HOME"] = str(ROOT / "profile")
 _LIB = str(ROOT / "lib")
 if _LIB not in sys.path:
     sys.path.append(_LIB)
+
 
 from auth.auth import (  # noqa: E402
     NativeAuth,
@@ -41,6 +43,14 @@ from auth.fixups import (  # noqa: E402
     fix_curl_ssl,
     install_gdk_xbox_dlls,
 )
+from auth.engine_profiles import (  # noqa: E402
+    installed_engine_profile,
+    read_custom_engine_metadata,
+)
+from auth.game_profile import (  # noqa: E402
+    apply_installed_engine_profile,
+    login_request_path,
+)
 from auth.gameinput import install_gameinput  # noqa: E402
 from auth.gpu_safety import (  # noqa: E402
     acknowledge_gpu_safety_incident,
@@ -49,6 +59,12 @@ from auth.gpu_safety import (  # noqa: E402
     require_safe_graphics_session,
 )
 from auth.log import BolError, ok  # noqa: E402
+from auth.remote_login import (  # noqa: E402
+    clear_remote_login_request,
+    monitor_remote_login,
+    present_device_code as _show_code,
+    read_remote_login_request,
+)
 from auth.prefix import active_prefix, boot_prefix, ensure_umu, prefix_ready  # noqa: E402
 from auth.wine_registry import (  # noqa: E402
     purge_registry_staging,
@@ -57,69 +73,6 @@ from auth.wine_registry import (  # noqa: E402
 )
 
 
-def _show_code(url: str, code: str) -> bool:
-    message = f"Open {url}\n\nEnter code: {code}"
-    prompt = (
-        "Your browser should open automatically.\n\n"
-        "Copy this code and complete sign-in, then click Continue.\n"
-        f"If it does not open, visit {url}."
-    )
-    keep_waiting = True
-    try:
-        opened = webbrowser.open(url)
-    except Exception:
-        opened = False
-    if not opened:
-        opener = shutil.which("xdg-open")
-        command = [opener, url] if opener else None
-        if not command and (opener := shutil.which("gio")):
-            command = [opener, "open", url]
-        if command:
-            subprocess.Popen(
-                command,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-    if shutil.which("kdialog"):
-        result = subprocess.run(
-            [
-                "kdialog",
-                "--title",
-                "MCBE GDK Installer",
-                "--inputbox",
-                prompt,
-                code,
-                "--ok-label",
-                "Continue",
-                "--cancel-label",
-                "Cancel",
-            ],
-            check=False,
-            stdout=subprocess.DEVNULL,
-        )
-        keep_waiting = result.returncode == 0
-    elif shutil.which("zenity"):
-        result = subprocess.run(
-            [
-                "zenity",
-                "--entry",
-                "--title=MCBE GDK Installer",
-                f"--text={prompt}",
-                f"--entry-text={code}",
-                "--ok-label=Continue",
-                "--cancel-label=Cancel",
-            ],
-            check=False,
-            stdout=subprocess.DEVNULL,
-        )
-        keep_waiting = result.returncode == 0
-    elif shutil.which("notify-send"):
-        subprocess.run(
-            ["notify-send", "MCBE GDK Installer sign-in", message],
-            check=False,
-        )
-    print(message, flush=True)
-    return keep_waiting
 
 
 def login(on_code=None) -> bool:
@@ -233,7 +186,10 @@ def prepare(game_dir: Path) -> None:
     exe = game_dir / "Minecraft.Windows.exe"
     if not exe.is_file():
         raise BolError(f"Missing game executable: {exe}")
-    signed_in = msa_signed_in()
+    profile = installed_engine_profile(ROOT)
+    custom_engine = read_custom_engine_metadata(ROOT)
+    apply_installed_engine_profile(ROOT, game_dir)
+    signed_in = custom_engine is None and msa_signed_in()
     if signed_in and ensure_login_deps():
         raise BolError("Python package 'cryptography' is required for Xbox sign-in.")
 
@@ -250,6 +206,14 @@ def prepare(game_dir: Path) -> None:
     _install_cryptbase_in_prefix()
     install_gameinput(prefix, game_dir)
     wine_apply_winegdk_prereqs()
+
+    if custom_engine is not None:
+        update_prefix_registry(
+            prefix,
+            machine=[reg_delete(WINEGDK_REG, "RefreshToken")],
+        )
+        bump_stack_reserve(exe)
+        return
 
     if not signed_in:
         update_prefix_registry(
@@ -296,9 +260,103 @@ def prepare(game_dir: Path) -> None:
     bump_stack_reserve(exe)
 
 
+def supervise(umu: Path, game: Path, arguments: list[str]) -> int:
+    umu = umu.resolve()
+    game = game.resolve()
+    profile = installed_engine_profile(ROOT)
+    stop_event = Event()
+    monitor_thread: Thread | None = None
+    fallback = ROOT / "profile" / "device-code.txt"
+
+    if profile and profile.authentication == "remote-connect-json":
+        request = login_request_path(game.parent, profile)
+        clear_remote_login_request(request)
+
+        def monitor() -> None:
+            try:
+                monitor_remote_login(
+                    request,
+                    lambda url, code: _show_code(
+                        url,
+                        code,
+                        emit=False,
+                        stop_event=stop_event,
+                        fallback_path=fallback,
+                    ),
+                    stop_event=stop_event,
+                )
+            except Exception as exc:
+                print(f"Remote login monitor: {exc}", file=sys.stderr, flush=True)
+
+        monitor_thread = Thread(
+            target=monitor,
+            name="mcbe-remote-login",
+            daemon=False,
+        )
+        monitor_thread.start()
+
+    try:
+        child = subprocess.Popen(
+            [sys.executable, str(umu), str(game), *arguments],
+            cwd=game.parent,
+            start_new_session=True,
+        )
+    except Exception:
+        stop_event.set()
+        if monitor_thread:
+            monitor_thread.join(timeout=3)
+        fallback.unlink(missing_ok=True)
+        raise
+    previous_handlers = {}
+
+    def forward_signal(signum, _frame) -> None:
+        if child.poll() is None:
+            try:
+                os.killpg(child.pid, signum)
+            except ProcessLookupError:
+                pass
+
+    for signum in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
+        previous_handlers[signum] = signal.signal(signum, forward_signal)
+    try:
+        return_code = child.wait()
+    finally:
+        stop_event.set()
+        if monitor_thread:
+            monitor_thread.join(timeout=3)
+        fallback.unlink(missing_ok=True)
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
+    return 128 - return_code if return_code < 0 else return_code
+
+
 def main(argv: list[str]) -> int:
     command = argv[1] if len(argv) > 1 else "status"
     try:
+        profile = installed_engine_profile(ROOT)
+        custom_engine = read_custom_engine_metadata(ROOT)
+        if command == "engine-profile":
+            if profile:
+                print(profile.identifier)
+            return 0
+        if command in {"login", "logout", "status"} and custom_engine is not None:
+            if profile and profile.authentication == "remote-connect-json":
+                messages = {
+                    "login": (
+                        "Launch Minecraft and select Sign In; the Microsoft "
+                        "device code will open automatically."
+                    ),
+                    "logout": "Sign out from the Profile screen inside Minecraft.",
+                    "status": "Account status is only available inside Minecraft.",
+                }
+            else:
+                messages = {
+                    "login": "Sign-in is managed by this custom engine.",
+                    "logout": "Sign-out is managed by this custom engine.",
+                    "status": "Account status is not exposed by this custom engine.",
+                }
+            print(messages[command])
+            return 3
         if command == "login":
             return 0 if login() else 1
         if command == "logout":
@@ -317,6 +375,11 @@ def main(argv: list[str]) -> int:
         if command == "prepare" and len(argv) == 3:
             prepare(Path(argv[2]))
             return 0
+        if command == "apply-engine-profile" and len(argv) == 3:
+            apply_installed_engine_profile(ROOT, Path(argv[2]))
+            return 0
+        if command == "supervise" and len(argv) >= 4:
+            return supervise(Path(argv[2]), Path(argv[3]), argv[4:])
         if command == "ensure-umu":
             ensure_umu()
             return 0
@@ -333,7 +396,9 @@ def main(argv: list[str]) -> int:
             return 0
         print(
             f"Usage: {argv[0]} login|logout|status|prepare GAME_DIR|"
-            "ensure-umu|ensure-deps|gpu-arm|gpu-disarm TOKEN|gpu-recover"
+            "apply-engine-profile GAME_DIR|engine-profile|"
+            "supervise UMU GAME [ARGS]|ensure-umu|ensure-deps|"
+            "gpu-arm|gpu-disarm TOKEN|gpu-recover"
         )
         return 2
     except BolError as exc:

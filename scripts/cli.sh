@@ -17,7 +17,7 @@ Commands:
   logout              Disconnect the saved account
   status              Show account status
   update              Install selected installer and engine updates
-  engine [VERSION]    Show or switch engine (for example: 0.1.5 or latest)
+  engine [ENGINE]     Show or switch engine (version, latest, or GitHub asset URL)
   recover             Acknowledge GPU recovery after troubleshooting
   setup-env [--fish]  Print the COM_MOJANG environment command
   help                Show this help

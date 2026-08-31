@@ -19,19 +19,25 @@ from updates import (  # noqa: E402
     INSTALLER_REPO,
     AvailableUpdates,
     Release,
+    CustomEngineAsset,
     UpdateError,
+    _apply_custom_engine_profile,
+    _custom_engine_is_ready,
     _download_verified,
     _engine_cli,
     _install_updates_cli,
     _validate_archive,
     _verify_checksum,
     check_for_updates,
+    fetch_custom_engine,
     fetch_latest_release,
     fetch_release,
     fetch_release_tags,
     is_newer,
+    install_custom_engine,
     install_engine_update,
     normalize_engine_selection,
+    read_engine_version,
     switch_engine,
 )
 
@@ -85,6 +91,48 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(normalize_engine_selection("latest"), "latest")
         with self.assertRaises(UpdateError):
             normalize_engine_selection("main")
+
+    def test_engine_selection_accepts_github_release_asset_urls(self):
+        url = (
+            "https://github.com/LukasPAH/GDK-Proton-Custom/releases/download/"
+            "release-10-32-4/GDK-Proton10-32-Custom-4.tar.gz"
+        )
+        self.assertEqual(normalize_engine_selection(url), url)
+        for invalid in (
+            "https://example.com/engine.tar.gz",
+            "https://github.com/owner/repo/archive/main.tar.gz",
+            "https://github.com/owner/repo/releases/download/tag/engine.zip",
+        ):
+            with self.assertRaises(UpdateError):
+                normalize_engine_selection(invalid)
+
+    def test_custom_engine_metadata_and_digest_are_resolved(self):
+        url = (
+            "https://github.com/LukasPAH/GDK-Proton-Custom/releases/download/"
+            "release-10-32-4/GDK-Proton10-32-Custom-4.tar.gz"
+        )
+        digest = "4d19774c64451d4f1395dc4c5f4b6e8b5fdbc1ce6c05e29a855f5e0678b8800c"
+        data = {
+            "tag_name": "release-10-32-4",
+            "assets": [
+                {
+                    "name": "GDK-Proton10-32-Custom-4.tar.gz",
+                    "state": "uploaded",
+                    "digest": f"sha256:{digest}",
+                    "browser_download_url": url,
+                }
+            ],
+        }
+        with patch("updates.urlopen", return_value=Response(json.dumps(data).encode())):
+            asset = fetch_custom_engine(url)
+        self.assertEqual(asset.repo, "LukasPAH/GDK-Proton-Custom")
+        self.assertEqual(asset.tag, "release-10-32-4")
+        self.assertEqual(asset.sha256, digest)
+
+        data["assets"][0]["digest"] = None
+        with patch("updates.urlopen", return_value=Response(json.dumps(data).encode())):
+            with self.assertRaisesRegex(UpdateError, "no SHA-256 digest"):
+                fetch_custom_engine(url)
 
     def test_latest_release_metadata_is_validated(self):
         repo = INSTALLER_REPO
@@ -165,6 +213,39 @@ class UpdateTests(unittest.TestCase):
             self.assertEqual(available.engine, selected)
             fetch.assert_called_once_with(ENGINE_REPO, "v0.1.5")
 
+    def test_custom_engine_selection_stays_pinned_during_update_checks(self):
+        url = (
+            "https://github.com/owner/custom-engine/releases/download/build-4/"
+            "custom-engine.tar.gz"
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            tool = root / "source"
+            tool.mkdir()
+            (tool / "VERSION").write_text("v0.1.3\n")
+            (root / "engine-release").write_text(url + "\n")
+            engine = root / "engine/GDK-Proton-mcbe-gdk"
+            engine.mkdir(parents=True)
+            (engine / ".mcbe-gdk-engine.json").write_text(
+                json.dumps(
+                    {
+                        "schema": 1,
+                        "repository": "owner/custom-engine",
+                        "tag": "build-4",
+                        "asset": "custom-engine.tar.gz",
+                        "url": url,
+                        "sha256": "a" * 64,
+                    }
+                )
+            )
+            with patch(
+                "updates.fetch_latest_release",
+                return_value=release(INSTALLER_REPO, "v0.1.3"),
+            ), patch("updates.fetch_release") as fetch:
+                available = check_for_updates(tool, root)
+            self.assertFalse(available)
+            fetch.assert_not_called()
+
     def test_engine_cli_switches_and_persists_selection(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -185,6 +266,136 @@ class UpdateTests(unittest.TestCase):
             install.assert_called_once()
             self.assertIn("Switched compatibility engine to v0.1.5.", output.getvalue())
 
+    def test_engine_cli_switches_to_custom_release_asset(self):
+        url = (
+            "https://github.com/LukasPAH/GDK-Proton-Custom/releases/download/"
+            "release-10-32-4/GDK-Proton10-32-Custom-4.tar.gz"
+        )
+        asset = CustomEngineAsset(
+            repo="LukasPAH/GDK-Proton-Custom",
+            tag="release-10-32-4",
+            name="GDK-Proton10-32-Custom-4.tar.gz",
+            url=url,
+            sha256="4d19774c64451d4f1395dc4c5f4b6e8b5fdbc1ce6c05e29a855f5e0678b8800c",
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            engine = root / "engine/GDK-Proton-mcbe-gdk"
+            engine.mkdir(parents=True)
+            (engine / "engine-manifest.json").write_text(
+                json.dumps({"version": "v0.1.7"})
+            )
+            output = io.StringIO()
+            with patch("updates.fetch_custom_engine", return_value=asset) as fetch, patch(
+                "updates.install_custom_engine"
+            ) as install, redirect_stdout(output):
+                result = _engine_cli(root, url)
+            self.assertEqual(result, 0)
+            self.assertEqual((root / "engine-release").read_text(), url + "\n")
+            fetch.assert_called_once_with(url)
+            install.assert_called_once()
+            self.assertIn(
+                "Switched compatibility engine to "
+                "LukasPAH/GDK-Proton-Custom@release-10-32-4.",
+                output.getvalue(),
+            )
+
+    def test_custom_engine_archive_is_normalized_and_identified(self):
+        url = (
+            "https://github.com/owner/custom-engine/releases/download/build-4/"
+            "custom-engine.tar.gz"
+        )
+        asset = CustomEngineAsset(
+            repo="owner/custom-engine",
+            tag="build-4",
+            name="custom-engine.tar.gz",
+            url=url,
+            sha256="a" * 64,
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = root / asset.name
+            with tarfile.open(archive, "w:gz") as bundle:
+                for name in (
+                    "Custom-Proton/proton",
+                    "Custom-Proton/files/bin/wine",
+                    "Custom-Proton/files/bin/wineserver",
+                ):
+                    info = tarfile.TarInfo(name)
+                    info.mode = 0o755
+                    info.size = len(name)
+                    bundle.addfile(info, io.BytesIO(name.encode()))
+            destination = root / "engine/GDK-Proton-mcbe-gdk"
+            destination.mkdir(parents=True)
+            (destination / "old-engine").touch()
+
+            with patch("updates._download_custom_engine", return_value=archive):
+                install_custom_engine(asset, root)
+
+            self.assertTrue((destination / "proton").is_file())
+            self.assertFalse((destination / "old-engine").exists())
+            self.assertEqual(
+                read_engine_version(root), "owner/custom-engine@build-4"
+            )
+            metadata = json.loads(
+                (destination / ".mcbe-gdk-engine.json").read_text()
+            )
+            self.assertEqual(metadata["url"], url)
+            self.assertEqual(metadata["sha256"], "a" * 64)
+            self.assertEqual(metadata["schema"], 2)
+            self.assertIn("proton", metadata["installed_sha256"])
+            self.assertTrue(_custom_engine_is_ready(root, asset))
+            (destination / "proton").write_bytes(b"tampered")
+            self.assertFalse(_custom_engine_is_ready(root, asset))
+
+    def test_lukas_engine_profile_patches_gaming_services_gate(self):
+        url = (
+            "https://github.com/LukasPAH/GDK-Proton-Custom/releases/download/"
+            "release-10-32-4/GDK-Proton10-32-Custom-4.tar.gz"
+        )
+        asset = CustomEngineAsset(
+            repo="LukasPAH/GDK-Proton-Custom",
+            tag="release-10-32-4",
+            name="GDK-Proton10-32-Custom-4.tar.gz",
+            url=url,
+            sha256="4d19774c64451d4f1395dc4c5f4b6e8b5fdbc1ce6c05e29a855f5e0678b8800c",
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary)
+            runtime = source / "files/lib/wine/x86_64-windows/xgameruntime.dll"
+            runtime.parent.mkdir(parents=True)
+            runtime.write_bytes(
+                b"before"
+                + bytes.fromhex("81 fe 4d 11 00 00 76 e4")
+                + b"after"
+            )
+            profile = _apply_custom_engine_profile(source, asset)
+            payload = runtime.read_bytes()
+
+        self.assertEqual(profile.identifier, "lukas-remote-connect-v1")
+        self.assertIn(bytes.fromhex("81 fe ff ff ff ff 76 e4"), payload)
+        self.assertNotIn(bytes.fromhex("81 fe 4d 11 00 00 76 e4"), payload)
+
+    def test_lukas_profile_is_selected_by_repository_name(self):
+        asset = CustomEngineAsset(
+            repo="lukaspah/gdk-proton-custom",
+            tag="future-release",
+            name="future-engine.tar.gz",
+            url=(
+                "https://github.com/LukasPAH/GDK-Proton-Custom/releases/"
+                "download/future-release/future-engine.tar.gz"
+            ),
+            sha256="b" * 64,
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary)
+            runtime = source / "files/lib/wine/x86_64-windows/xgameruntime.dll"
+            runtime.parent.mkdir(parents=True)
+            runtime.write_bytes(b"future runtime without the legacy gate")
+            profile = _apply_custom_engine_profile(source, asset)
+
+        self.assertEqual(profile.identifier, "lukas-remote-connect-v1")
+
     def test_checksum_and_archive_paths_are_verified(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -204,7 +415,25 @@ class UpdateTests(unittest.TestCase):
                 info.size = 1
                 bundle.addfile(info, io.BytesIO(b"x"))
             with self.assertRaises(UpdateError):
-                _validate_archive(unsafe, "mcbe-gdk-installer", links=False)
+                _validate_archive(
+                    unsafe,
+                    "mcbe-gdk-installer",
+                    links=False,
+                    max_unpacked=1024,
+                )
+
+            oversized = root / "oversized.tar.gz"
+            with tarfile.open(oversized, "w:gz") as bundle:
+                info = tarfile.TarInfo("mcbe-gdk-installer/payload")
+                info.size = 2
+                bundle.addfile(info, io.BytesIO(b"xx"))
+            with self.assertRaisesRegex(UpdateError, "size limit"):
+                _validate_archive(
+                    oversized,
+                    "mcbe-gdk-installer",
+                    links=False,
+                    max_unpacked=1,
+                )
 
     def test_verified_download_reports_progress_and_verification(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -284,19 +513,17 @@ class UpdateTests(unittest.TestCase):
             root = Path(temporary)
             selected = release(ENGINE_REPO, "v0.1.8")
 
-            def extract(command, check):
-                self.assertTrue(check)
-                work = Path(command[command.index("-C") + 1])
-                source = work / "GDK-Proton-mcbe-gdk"
-                source.mkdir()
-                (source / "engine-manifest.json").write_text(
-                    json.dumps({"version": selected.tag})
+            archive = root / "engine.tar.gz"
+            manifest_payload = json.dumps({"version": selected.tag}).encode()
+            with tarfile.open(archive, "w:gz") as bundle:
+                info = tarfile.TarInfo(
+                    "GDK-Proton-mcbe-gdk/engine-manifest.json"
                 )
+                info.size = len(manifest_payload)
+                bundle.addfile(info, io.BytesIO(manifest_payload))
 
             with patch(
-                "updates._download_verified", return_value=root / "engine.tar.gz"
-            ), patch("updates._validate_archive"), patch(
-                "updates.subprocess.run", side_effect=extract
+                "updates._download_verified", return_value=archive
             ):
                 install_engine_update(selected, root)
 
@@ -317,12 +544,13 @@ class UpdateTests(unittest.TestCase):
             selected = release(ENGINE_REPO, "v0.1.5")
             with patch("updates.fetch_release", return_value=selected) as fetch, patch(
                 "updates.install_engine_update"
-            ) as install:
+            ) as install, patch("updates._apply_game_profile") as apply_profile:
                 result = switch_engine(root, "0.1.5")
             self.assertEqual(result.tag, "v0.1.5")
             self.assertEqual((root / "engine-release").read_text(), "v0.1.5\n")
             fetch.assert_called_once_with(ENGINE_REPO, "v0.1.5")
             install.assert_called_once_with(selected, root, None)
+            apply_profile.assert_called_once_with(root)
 
             # Persisting the already-installed version never reinstalls.
             (engine / "engine-manifest.json").write_text(

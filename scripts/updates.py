@@ -16,8 +16,17 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Callable
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, unquote, urlparse
 from urllib.request import Request, urlopen
+
+from auth.engine_profiles import (
+    CUSTOM_ENGINE_METADATA,
+    EngineProfile,
+    profile_for_repository,
+    read_custom_engine_metadata,
+)
+from auth.game_profile import apply_installed_engine_profile
+from auth.log import BolError
 
 INSTALLER_REPO = "veedy-dev/mcbe-gdk-installer"
 ENGINE_REPO = "veedy-dev/mcbe-gdk-engine"
@@ -26,6 +35,11 @@ ENGINE_SELECTION_FILE = "engine-release"
 API_VERSION = "2022-11-28"
 MAX_RELEASE_JSON = 1_000_000
 MAX_RELEASE_LIST_JSON = 10_000_000
+MAX_ARCHIVE_MEMBERS = 200_000
+MAX_ARCHIVE_PATH = 4096
+MAX_ARCHIVE_MEMBER = 2_500_000_000
+MAX_INSTALLER_UNPACKED = 100_000_000
+MAX_ENGINE_UNPACKED = 8_000_000_000
 ProgressCallback = Callable[[str, int | None, int | None], None]
 
 
@@ -41,6 +55,15 @@ class Release:
     body: str
     url: str
     assets: dict[str, str]
+
+
+@dataclass(frozen=True)
+class CustomEngineAsset:
+    repo: str
+    tag: str
+    name: str
+    url: str
+    sha256: str
 
 
 @dataclass(frozen=True)
@@ -63,8 +86,36 @@ def is_newer(candidate: str, current: str) -> bool:
     return version_tuple(candidate) > version_tuple(current)
 
 
+def _parse_custom_engine_url(value: str) -> tuple[str, str, str]:
+    parsed = urlparse(value.strip())
+    if (
+        parsed.scheme != "https"
+        or parsed.netloc.lower() != "github.com"
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise UpdateError("Custom engines must use a GitHub release asset URL.")
+    parts = [unquote(part) for part in parsed.path.strip("/").split("/")]
+    if (
+        len(parts) != 6
+        or parts[2:4] != ["releases", "download"]
+        or any(not part or part in {".", ".."} for part in parts)
+        or any("/" in part or "\\" in part for part in parts)
+    ):
+        raise UpdateError("Custom engines must use a GitHub release asset URL.")
+    owner, repository, _, _, tag, asset = parts
+    if not all(re.fullmatch(r"[A-Za-z0-9_.-]+", part) for part in (owner, repository)):
+        raise UpdateError("Custom engine repository is invalid.")
+    if not asset.lower().endswith(".tar.gz"):
+        raise UpdateError("Custom engine assets must be .tar.gz archives.")
+    return f"{owner}/{repository}", tag, asset
+
+
 def normalize_engine_selection(value: str) -> str:
     value = value.strip()
+    if value.startswith("https://"):
+        _parse_custom_engine_url(value)
+        return value
     if value == "latest":
         return value
     if re.fullmatch(r"\d+\.\d+\.\d+", value):
@@ -83,6 +134,58 @@ def _github_url(url: str, repo: str, *, download: bool = False) -> str:
     if download and "/download/" not in parsed.path:
         raise UpdateError("GitHub returned an invalid asset URL.")
     return url
+
+
+def fetch_custom_engine(url: str, *, timeout: int = 10) -> CustomEngineAsset:
+    repo, tag, asset_name = _parse_custom_engine_url(url)
+    request = Request(
+        f"https://api.github.com/repos/{repo}/releases/tags/{quote(tag, safe='')}",
+        headers={
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": API_VERSION,
+            "User-Agent": "mcbe-gdk-installer",
+        },
+    )
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            raw = response.read(MAX_RELEASE_JSON + 1)
+    except OSError as exc:
+        raise UpdateError(f"Could not check {repo} releases: {exc}") from exc
+    if len(raw) > MAX_RELEASE_JSON:
+        raise UpdateError("GitHub returned an unexpectedly large release response.")
+    try:
+        data = json.loads(raw)
+        if str(data["tag_name"]) != tag:
+            raise UpdateError("GitHub release tag does not match the asset URL.")
+        for asset in data.get("assets", []):
+            if str(asset.get("name")) != asset_name:
+                continue
+            asset_url = str(asset["browser_download_url"])
+            asset_repo, asset_tag, resolved_name = _parse_custom_engine_url(asset_url)
+            if (
+                asset.get("state") != "uploaded"
+                or asset_repo.lower() != repo.lower()
+                or asset_tag != tag
+                or resolved_name != asset_name
+            ):
+                raise UpdateError("GitHub release asset does not match the requested URL.")
+            digest = re.fullmatch(
+                r"sha256:([0-9a-fA-F]{64})", str(asset.get("digest") or "")
+            )
+            if not digest:
+                raise UpdateError("GitHub release asset has no SHA-256 digest.")
+            return CustomEngineAsset(
+                repo=repo,
+                tag=tag,
+                name=asset_name,
+                url=asset_url,
+                sha256=digest.group(1).lower(),
+            )
+    except UpdateError:
+        raise
+    except (KeyError, TypeError, ValueError) as exc:
+        raise UpdateError("GitHub returned invalid release metadata.") from exc
+    raise UpdateError(f"{tag} is missing {asset_name}.")
 
 
 def fetch_release(
@@ -176,7 +279,31 @@ def read_installer_version(tool_root: Path) -> str:
         return "v0.0.0"
 
 
+def _installed_engine_hashes(engine: Path) -> dict[str, str]:
+    required = (
+        "proton",
+        "files/bin/wine",
+        "files/bin/wineserver",
+    )
+    optional = ("files/lib/wine/x86_64-windows/xgameruntime.dll",)
+    hashes = {}
+    for relative in (*required, *optional):
+        path = engine / relative
+        if not path.is_file():
+            if relative in optional:
+                continue
+            raise UpdateError(f"Installed engine is missing {relative}.")
+        digest = hashlib.sha256()
+        with path.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+        hashes[relative] = digest.hexdigest()
+    return hashes
+
 def read_engine_version(root: Path) -> str | None:
+    custom = read_custom_engine_metadata(root)
+    if custom:
+        return f"{custom['repository']}@{custom['tag']}"
     manifest = root / "engine/GDK-Proton-mcbe-gdk/engine-manifest.json"
     if not manifest.is_file():
         return None
@@ -223,7 +350,11 @@ def check_for_updates(
         installer = None
     try:
         selection = read_engine_selection(root)
-        engine = fetch_release(ENGINE_REPO, selection)
+        engine = (
+            None
+            if selection.startswith("https://")
+            else fetch_release(ENGINE_REPO, selection)
+        )
     except UpdateError:
         engine = None
     if raise_if_unavailable and installer is None and engine is None:
@@ -282,6 +413,10 @@ def _verify_checksum(archive: Path, checksum: Path) -> None:
         raise UpdateError("Release checksum is invalid.") from exc
     if filename != archive.name:
         raise UpdateError("Release checksum names a different asset.")
+    _verify_digest(archive, expected)
+
+
+def _verify_digest(archive: Path, expected: str) -> None:
     digest = hashlib.sha256()
     with archive.open("rb") as source:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
@@ -318,23 +453,145 @@ def _download_verified(
     return archive
 
 
-def _validate_archive(archive: Path, expected_root: str, *, links: bool) -> None:
-    with tarfile.open(archive, "r:gz") as bundle:
-        for member in bundle.getmembers():
+def _download_custom_engine(
+    asset: CustomEngineAsset,
+    directory: Path,
+    progress: ProgressCallback | None = None,
+) -> Path:
+    archive = directory / asset.name
+    download_progress = None
+    if progress:
+        download_progress = lambda current, total: progress(
+            "engine_download", current, total
+        )
+    _download(asset.url, archive, 1_500_000_000, download_progress)
+    if progress:
+        progress("engine_verify", None, None)
+    _verify_digest(archive, asset.sha256)
+    return archive
+
+
+def _validate_archive(
+    archive: Path,
+    expected_root: str | None,
+    *,
+    links: bool,
+    max_unpacked: int,
+) -> str:
+    archive_root = expected_root
+    unpacked = 0
+    try:
+        bundle = tarfile.open(archive, "r:gz")
+    except (OSError, tarfile.TarError) as exc:
+        raise UpdateError("Release archive is not a readable tar.gz file.") from exc
+    with bundle:
+        for count, member in enumerate(bundle, 1):
+            if count > MAX_ARCHIVE_MEMBERS:
+                raise UpdateError("Release archive contains too many entries.")
+            if len(member.name) > MAX_ARCHIVE_PATH:
+                raise UpdateError("Release archive contains an overlong path.")
             path = PurePosixPath(member.name)
             if path.is_absolute() or ".." in path.parts or not path.parts:
                 raise UpdateError("Release archive contains an unsafe path.")
-            if path.parts[0] != expected_root:
+            member_root = path.parts[0]
+            if archive_root is None:
+                archive_root = member_root
+            elif member_root != archive_root:
                 raise UpdateError("Release archive has an unexpected root directory.")
-            if member.isdev() or member.isfifo():
+            if member.size > MAX_ARCHIVE_MEMBER:
+                raise UpdateError("Release archive contains an oversized file.")
+            if member.isfile():
+                unpacked += member.size
+                if unpacked > max_unpacked:
+                    raise UpdateError("Release archive expands beyond its size limit.")
+            elif not (
+                member.isdir()
+                or member.issym()
+                or member.islnk()
+            ):
                 raise UpdateError("Release archive contains an unsupported file.")
             if member.issym() or member.islnk():
                 if not links:
                     raise UpdateError("Installer archive contains an unexpected link.")
-                base = path.parent if member.issym() else PurePosixPath(expected_root)
+                base = path.parent if member.issym() else PurePosixPath(archive_root)
                 target = posixpath.normpath(str(base / member.linkname))
-                if target != expected_root and not target.startswith(expected_root + "/"):
+                if target != archive_root and not target.startswith(archive_root + "/"):
                     raise UpdateError("Release archive contains an unsafe link.")
+    if archive_root is None:
+        raise UpdateError("Release archive is empty.")
+    return archive_root
+
+
+def _extract_archive(archive: Path, destination: Path) -> None:
+    try:
+        with tarfile.open(archive, "r:gz") as bundle:
+            bundle.extractall(destination, filter="data")
+    except (OSError, tarfile.TarError) as exc:
+        raise UpdateError("Could not safely extract the release archive.") from exc
+
+
+def _validate_custom_engine_archive(archive: Path) -> str:
+    archive_root = _validate_archive(
+        archive,
+        None,
+        links=True,
+        max_unpacked=MAX_ENGINE_UNPACKED,
+    )
+    required = (
+        f"{archive_root}/proton",
+        f"{archive_root}/files/bin/wine",
+        f"{archive_root}/files/bin/wineserver",
+    )
+    with tarfile.open(archive, "r:gz") as bundle:
+        try:
+            members = [bundle.getmember(name) for name in required]
+        except KeyError as exc:
+            raise UpdateError("Custom engine archive is missing its Proton runtime.") from exc
+    if any(not member.isfile() or not member.mode & 0o111 for member in members):
+        raise UpdateError("Custom engine archive has invalid Proton executables.")
+    return archive_root
+
+
+def _custom_engine_is_ready(root: Path, asset: CustomEngineAsset) -> bool:
+    metadata = read_custom_engine_metadata(root)
+    engine = root / "engine/GDK-Proton-mcbe-gdk"
+    if (
+        not metadata
+        or metadata.get("schema") != 2
+        or metadata["url"] != asset.url
+        or metadata["sha256"] != asset.sha256
+        or not isinstance(metadata.get("installed_sha256"), dict)
+    ):
+        return False
+    try:
+        return _installed_engine_hashes(engine) == metadata["installed_sha256"]
+    except UpdateError:
+        return False
+
+
+def _apply_custom_engine_profile(
+    source: Path, asset: CustomEngineAsset
+) -> EngineProfile | None:
+    profile = profile_for_repository(asset.repo)
+    if not profile:
+        return None
+    if not profile.patch_gaming_services_gate:
+        return profile
+
+    runtime = source / "files/lib/wine/x86_64-windows/xgameruntime.dll"
+    try:
+        payload = runtime.read_bytes()
+    except OSError as exc:
+        raise UpdateError("Profiled engine is missing xgameruntime.dll.") from exc
+    version_gate = bytes.fromhex("81 fe 4d 11 00 00 76 e4")
+    patched_gate = bytes.fromhex("81 fe ff ff ff ff 76 e4")
+    unpatched_count = payload.count(version_gate)
+    patched_count = payload.count(patched_gate)
+    if unpatched_count == 1 and patched_count == 0:
+        runtime.write_bytes(payload.replace(version_gate, patched_gate, 1))
+    elif unpatched_count > 1 or (unpatched_count and patched_count):
+        raise UpdateError("Profiled engine has an ambiguous Gaming Services gate.")
+    return profile
 
 
 def _replace_directory(source: Path, destination: Path) -> Path:
@@ -368,8 +625,13 @@ def install_installer_update(
         )
         if progress:
             progress("installer_install", None, None)
-        _validate_archive(archive, "mcbe-gdk-installer", links=False)
-        subprocess.run(["tar", "-xzf", archive, "-C", work], check=True)
+        _validate_archive(
+            archive,
+            "mcbe-gdk-installer",
+            links=False,
+            max_unpacked=MAX_INSTALLER_UNPACKED,
+        )
+        _extract_archive(archive, work)
         source = work / "mcbe-gdk-installer"
         if read_installer_version(source) != release.tag:
             raise UpdateError("Installer archive version does not match its release.")
@@ -393,6 +655,21 @@ def install_installer_update(
             progress("installer_done", None, None)
 
 
+def _apply_game_profile(root: Path) -> None:
+    try:
+        game_dir = Path(
+            (root / "game-dir").read_text(encoding="utf-8").strip()
+        ).expanduser()
+    except OSError:
+        return
+    if not game_dir.is_dir():
+        return
+    try:
+        apply_installed_engine_profile(root, game_dir)
+    except BolError as exc:
+        raise UpdateError(f"Could not apply the engine game profile: {exc}") from exc
+
+
 def install_engine_update(
     release: Release,
     root: Path,
@@ -410,8 +687,13 @@ def install_engine_update(
         )
         if progress:
             progress("engine_install", None, None)
-        _validate_archive(archive, "GDK-Proton-mcbe-gdk", links=True)
-        subprocess.run(["tar", "-xzf", archive, "-C", work], check=True)
+        _validate_archive(
+            archive,
+            "GDK-Proton-mcbe-gdk",
+            links=True,
+            max_unpacked=MAX_ENGINE_UNPACKED,
+        )
+        _extract_archive(archive, work)
         source = work / "GDK-Proton-mcbe-gdk"
         try:
             manifest = json.loads(
@@ -442,8 +724,55 @@ def switch_engine(
     if not engine_is_ready(root, release.tag):
         install_engine_update(release, root, progress)
     root.mkdir(parents=True, exist_ok=True)
+    _apply_game_profile(root)
     (root / ENGINE_SELECTION_FILE).write_text(selected + "\n", encoding="utf-8")
     return release
+
+
+def install_custom_engine(
+    asset: CustomEngineAsset,
+    root: Path,
+    progress: ProgressCallback | None = None,
+) -> None:
+    engine_parent = root / "engine"
+    engine_parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix=".engine-update.", dir=engine_parent
+    ) as temporary:
+        work = Path(temporary)
+        archive = _download_custom_engine(asset, work, progress)
+        if progress:
+            progress("engine_install", None, None)
+        archive_root = _validate_custom_engine_archive(archive)
+        _extract_archive(archive, work)
+        source = work / archive_root
+        profile = _apply_custom_engine_profile(source, asset)
+        metadata = {
+            "schema": 2,
+            "repository": asset.repo,
+            "tag": asset.tag,
+            "asset": asset.name,
+            "url": asset.url,
+            "sha256": asset.sha256,
+            "installed_sha256": _installed_engine_hashes(source),
+        }
+        if profile:
+            metadata["profile"] = profile.identifier
+            metadata["capabilities"] = profile.capabilities()
+        metadata_path = source / CUSTOM_ENGINE_METADATA
+        metadata_path.unlink(missing_ok=True)
+        metadata_path.write_text(
+            json.dumps(metadata, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        destination = engine_parent / "GDK-Proton-mcbe-gdk"
+        if destination.exists():
+            backup = _replace_directory(source, destination)
+            shutil.rmtree(backup)
+        else:
+            source.rename(destination)
+        if progress:
+            progress("engine_done", None, None)
 
 
 def install_available_updates(
@@ -524,6 +853,25 @@ def _engine_cli(root: Path, selection: str | None) -> int:
 
     selected = normalize_engine_selection(selection)
     print(f"Resolving compatibility engine {selected}…")
+    custom_asset = (
+        fetch_custom_engine(selected) if selected.startswith("https://") else None
+    )
+    release = None if custom_asset else fetch_release(ENGINE_REPO, selected)
+    already_installed = (
+        bool(custom_asset and _custom_engine_is_ready(root, custom_asset))
+        or bool(release and engine_is_ready(root, release.tag))
+    )
+    if already_installed:
+        root.mkdir(parents=True, exist_ok=True)
+        _apply_game_profile(root)
+        selection_file.write_text(selected + "\n", encoding="utf-8")
+        identity = (
+            f"{custom_asset.repo}@{custom_asset.tag}"
+            if custom_asset
+            else release.tag
+        )
+        print(f"Compatibility engine {identity} is already installed.")
+        return 0
     seen: set[str] = set()
     labels = {
         "engine_download": "Downloading compatibility engine",
@@ -537,11 +885,16 @@ def _engine_cli(root: Path, selection: str | None) -> int:
             seen.add(stage)
             print(f"{labels.get(stage, 'Switching compatibility engine')}…")
 
-    release = switch_engine(root, selected, progress)
-    if current == release.tag:
-        print(f"Compatibility engine {release.tag} is already installed.")
+    if custom_asset:
+        install_custom_engine(custom_asset, root, progress)
+        identity = f"{custom_asset.repo}@{custom_asset.tag}"
     else:
-        print(f"Switched compatibility engine to {release.tag}.")
+        assert release
+        install_engine_update(release, root, progress)
+        identity = release.tag
+    _apply_game_profile(root)
+    selection_file.write_text(selected + "\n", encoding="utf-8")
+    print(f"Switched compatibility engine to {identity}.")
     return 0
 
 
@@ -573,7 +926,8 @@ def main(argv: list[str]) -> int:
             return 1
     print(
         f"Usage: {argv[0]} latest-tag OWNER/REPOSITORY | "
-        "install SOURCE ROOT | engine ROOT [VERSION|latest]",
+        "install SOURCE ROOT | "
+        "engine ROOT [VERSION|latest|GITHUB-RELEASE-ASSET-URL]",
         file=sys.stderr,
     )
     return 2

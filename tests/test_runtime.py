@@ -83,6 +83,7 @@ exit 99
 
             (root / "lib" / "runtime.py").write_text(
                 """import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -91,6 +92,11 @@ with trace.open("a", encoding="utf-8") as stream:
     stream.write(sys.argv[1] + "\\n")
 if sys.argv[1] == "gpu-arm":
     print("a" * 32)
+elif sys.argv[1] == "supervise":
+    raise SystemExit(subprocess.run(
+        [sys.executable, sys.argv[2], *sys.argv[3:]],
+        check=False,
+    ).returncode)
 """,
                 encoding="utf-8",
             )
@@ -279,6 +285,7 @@ exec "$NTSYNC_TEST_REAL_GREP" "$@"
         code = """
 from unittest.mock import patch
 
+from auth import remote_login
 from scripts import runtime
 
 url = "https://www.microsoft.com/link"
@@ -287,16 +294,16 @@ device_code = "ABCD1234"
 def which(name):
     return f"/usr/bin/{name}" if name in {"xdg-open", "kdialog"} else None
 
-with patch.object(runtime.webbrowser, "open", return_value=False) as browser, \\
-     patch.object(runtime.shutil, "which", side_effect=which), \\
-     patch.object(runtime.subprocess, "Popen") as popen, \\
-     patch.object(runtime.subprocess, "run") as run:
-    run.return_value.returncode = 0
+with patch.object(remote_login.webbrowser, "open", return_value=False) as browser, \\
+     patch.object(remote_login.shutil, "which", side_effect=which), \\
+     patch.object(remote_login.subprocess, "Popen") as popen:
+    popen.return_value.poll.return_value = 0
+    popen.return_value.returncode = 0
     assert runtime._show_code(url, device_code)
 
 browser.assert_called_once_with(url)
-assert popen.call_args.args[0] == ["/usr/bin/xdg-open", url]
-dialog = run.call_args.args[0]
+assert popen.call_args_list[0].args[0] == ["/usr/bin/xdg-open", url]
+dialog = popen.call_args_list[1].args[0]
 assert "--inputbox" in dialog
 prompt_index = dialog.index("--inputbox")
 assert url in dialog[prompt_index + 1]
@@ -317,6 +324,330 @@ with patch.object(runtime, "login", side_effect=KeyboardInterrupt):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("Traceback", result.stderr)
         self.assertIn("Sign-in cancelled.", result.stderr)
+
+    def test_lukas_profile_manages_game_identity_and_bootstrap(self):
+        repo = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            game = root / "game"
+            engine = root / "engine/GDK-Proton-mcbe-gdk"
+            game.mkdir(parents=True)
+            engine.mkdir(parents=True)
+            (engine / ".mcbe-gdk-engine.json").write_text(
+                json.dumps(
+                    {
+                        "schema": 2,
+                        "profile": "lukas-remote-connect-v1",
+                        "repository": "LukasPAH/GDK-Proton-Custom",
+                        "tag": "test",
+                        "asset": "engine.tar.gz",
+                        "url": (
+                            "https://github.com/LukasPAH/GDK-Proton-Custom/"
+                            "releases/download/test/engine.tar.gz"
+                        ),
+                        "sha256": "a" * 64,
+                        "capabilities": {
+                            "authentication": "remote-connect-json",
+                            "disable_app_runtime_bootstrap": True,
+                            "login_request_parent_levels": 1,
+                            "msa_app_id": "0000000048183522",
+                            "title_id": "67b57dac",
+                            "patch_gaming_services_gate": True,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (game / "appxmanifest.xml").write_text(
+                """<?xml version="1.0"?>
+<Package>
+  <Identity Name="Microsoft.MinecraftUWP" Publisher="CN=Microsoft"
+            Version="1.26.4031.0"/>
+  <Properties>
+    <DisplayName>Minecraft for Windows</DisplayName>
+    <PublisherDisplayName>Microsoft Studios</PublisherDisplayName>
+    <Description>Minecraft</Description>
+  </Properties>
+  <Applications>
+    <Application Id="Game" Executable="Minecraft.Windows.exe">
+      <VisualElements DisplayName="Minecraft for Windows"
+                      Square150x150Logo="Logo.png"
+                      Square44x44Logo="SmallLogo.png"/>
+    </Application>
+  </Applications>
+</Package>
+""",
+                encoding="utf-8",
+            )
+            bootstrap = game / "Microsoft.WindowsAppRuntime.Bootstrap.dll"
+            bootstrap.write_bytes(b"bootstrap")
+            code = """
+import json
+import xml.etree.ElementTree as ET
+from pathlib import Path
+from auth.game_profile import apply_game_profile
+from scripts import runtime
+assert runtime.main(["runtime.py", "status"]) == 3
+metadata_path = (
+    runtime.ROOT
+    / "engine/GDK-Proton-mcbe-gdk/.mcbe-gdk-engine.json"
+)
+metadata = json.loads(metadata_path.read_text())
+metadata["capabilities"]["authentication"] = "tampered"
+metadata_path.write_text(json.dumps(metadata))
+assert runtime.installed_engine_profile(runtime.ROOT) is None
+metadata["capabilities"]["authentication"] = "remote-connect-json"
+metadata_path.write_text(json.dumps(metadata))
+
+game = Path(runtime.os.environ["MCBE_GDK_ROOT"]) / "game"
+profile = runtime.installed_engine_profile(runtime.ROOT)
+assert profile and profile.identifier == "lukas-remote-connect-v1"
+runtime.apply_installed_engine_profile(runtime.ROOT, game)
+config = ET.parse(game / "MicrosoftGame.Config").getroot()
+values = {child.tag: child.text for child in config}
+assert values["MSAAppId"] == "0000000048183522"
+assert values["TitleId"] == "67b57dac"
+assert not (game / "Microsoft.WindowsAppRuntime.Bootstrap.dll").exists()
+
+apply_game_profile(runtime.ROOT, game, None)
+assert not (game / "MicrosoftGame.Config").exists()
+assert (game / "Microsoft.WindowsAppRuntime.Bootstrap.dll").read_bytes() == b"bootstrap"
+"""
+            result = subprocess.run(
+                [sys.executable, "-c", code],
+                cwd=repo,
+                env={**os.environ, "MCBE_GDK_ROOT": str(root)},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_profile_restores_original_config_and_refuses_user_changes(self):
+        repo = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            game = root / "game"
+            game.mkdir()
+            (game / "appxmanifest.xml").write_text(
+                """<Package>
+<Identity Name="Microsoft.MinecraftUWP" Publisher="CN=Microsoft"
+          Version="1.26.4031.0"/>
+<Application Id="Game" Executable="Minecraft.Windows.exe"/>
+</Package>
+""",
+                encoding="utf-8",
+            )
+            config = game / "MicrosoftGame.Config"
+            original = (
+                b'<?xml version="1.0"?>\n'
+                b'<Game configVersion="1"><MSAAppId>old</MSAAppId>'
+                b'<TitleId>AAAAAAAA</TitleId><Custom>keep</Custom></Game>\n'
+            )
+            config.write_bytes(original)
+            (game / "Microsoft.WindowsAppRuntime.Bootstrap.dll").write_bytes(
+                b"bootstrap"
+            )
+            code = """
+from pathlib import Path
+from auth.engine_profiles import LUKAS_ENGINE_PROFILE
+from auth.game_profile import apply_game_profile
+from auth.log import BolError
+from scripts import runtime
+
+game = Path(runtime.os.environ["MCBE_GDK_ROOT"]) / "game"
+config = game / "MicrosoftGame.Config"
+apply_game_profile(runtime.ROOT, game, LUKAS_ENGINE_PROFILE)
+managed = config.read_bytes()
+config.write_bytes(managed + b"changed")
+try:
+    apply_game_profile(runtime.ROOT, game, LUKAS_ENGINE_PROFILE)
+except BolError as exc:
+    assert "refusing to overwrite" in str(exc)
+else:
+    raise AssertionError("managed config changes were overwritten")
+config.write_bytes(managed)
+apply_game_profile(runtime.ROOT, game, None)
+"""
+            result = subprocess.run(
+                [sys.executable, "-c", code],
+                cwd=repo,
+                env={**os.environ, "MCBE_GDK_ROOT": str(root)},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(config.read_bytes(), original)
+            self.assertEqual(
+                (game / "Microsoft.WindowsAppRuntime.Bootstrap.dll").read_bytes(),
+                b"bootstrap",
+            )
+
+    def test_remote_login_request_is_validated_and_delivered(self):
+        repo = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            request = root / "login.json"
+            code = """
+import json
+from pathlib import Path
+from scripts import runtime
+
+request = Path(runtime.os.environ["MCBE_GDK_ROOT"]) / "login.json"
+request.write_text(json.dumps({
+    "verification_uri": "https://www.microsoft.com/link",
+    "user_code": "ABCD-1234",
+}))
+seen = []
+assert runtime.monitor_remote_login(
+    request,
+    lambda url, code: seen.append((url, code)),
+    timeout=0.02,
+    poll_interval=0.001,
+)
+assert seen == [("https://www.microsoft.com/link", "ABCD-1234")]
+
+request.write_text('{"verification_uri":')
+assert runtime.read_remote_login_request(request) is None
+request.write_text(json.dumps({
+    "verification_uri": "https://example.com/link",
+    "user_code": "ABCD-1234",
+}))
+try:
+    runtime.read_remote_login_request(request)
+except runtime.BolError as exc:
+    assert "untrusted URL" in str(exc)
+else:
+    raise AssertionError("untrusted login URL was accepted")
+"""
+            result = subprocess.run(
+                [sys.executable, "-c", code],
+                cwd=repo,
+                env={**os.environ, "MCBE_GDK_ROOT": str(root)},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_python_supervisor_delivers_lukas_login_request(self):
+        repo = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            engine = root / "engine/GDK-Proton-mcbe-gdk"
+            game = root / "game"
+            engine.mkdir(parents=True)
+            game.mkdir()
+            (game / "Minecraft.Windows.exe").touch()
+            (engine / ".mcbe-gdk-engine.json").write_text(
+                json.dumps(
+                    {
+                        "schema": 2,
+                        "profile": "lukas-remote-connect-v1",
+                        "repository": "LukasPAH/GDK-Proton-Custom",
+                        "tag": "test",
+                        "asset": "engine.tar.gz",
+                        "url": (
+                            "https://github.com/LukasPAH/GDK-Proton-Custom/"
+                            "releases/download/test/engine.tar.gz"
+                        ),
+                        "sha256": "a" * 64,
+                        "capabilities": {
+                            "authentication": "remote-connect-json",
+                            "disable_app_runtime_bootstrap": True,
+                            "login_request_parent_levels": 1,
+                            "msa_app_id": "0000000048183522",
+                            "title_id": "67b57dac",
+                            "patch_gaming_services_gate": True,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            umu = root / "umu.py"
+            umu.write_text(
+                """import json
+import time
+from pathlib import Path
+Path(__file__).with_name("login.json").write_text(json.dumps({
+    "verification_uri": "https://www.microsoft.com/link",
+    "user_code": "ABCD-1234",
+}))
+time.sleep(0.6)
+raise SystemExit(7)
+""",
+                encoding="utf-8",
+            )
+            code = """
+from pathlib import Path
+from unittest.mock import patch
+from scripts import runtime
+
+root = Path(runtime.os.environ["MCBE_GDK_ROOT"])
+with patch.object(runtime, "_show_code", return_value=True) as show:
+    result = runtime.supervise(
+        root / "umu.py",
+        root / "game/Minecraft.Windows.exe",
+        [],
+    )
+assert result == 7
+show.assert_called_once()
+assert show.call_args.args == (
+    "https://www.microsoft.com/link",
+    "ABCD-1234",
+)
+"""
+            result = subprocess.run(
+                [sys.executable, "-c", code],
+                cwd=repo,
+                env={**os.environ, "MCBE_GDK_ROOT": str(root)},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_remote_login_has_protected_no_gui_fallback(self):
+        repo = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            code = """
+import builtins
+import stat
+from pathlib import Path
+from unittest.mock import patch
+from auth import remote_login
+
+fallback = Path(__import__("os").environ["MCBE_GDK_ROOT"]) / "device-code.txt"
+real_open = builtins.open
+def open_without_tty(path, *args, **kwargs):
+    if path == "/dev/tty":
+        raise OSError("no terminal")
+    return real_open(path, *args, **kwargs)
+
+with patch.object(remote_login.webbrowser, "open", return_value=False), \\
+     patch.object(remote_login.shutil, "which", return_value=None), \\
+     patch.object(remote_login, "open", new=open_without_tty, create=True):
+    assert remote_login.present_device_code(
+        "https://www.microsoft.com/link",
+        "ABCD-1234",
+        emit=False,
+        fallback_path=fallback,
+    )
+assert fallback.read_text().endswith("Enter code: ABCD-1234\\n")
+assert stat.S_IMODE(fallback.stat().st_mode) == 0o600
+"""
+            result = subprocess.run(
+                [sys.executable, "-c", code],
+                cwd=repo,
+                env={**os.environ, "MCBE_GDK_ROOT": str(root)},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("ABCD-1234", result.stdout)
 
     def test_gui_uses_the_installed_profile_for_auth(self):
         gui = (
@@ -574,7 +905,7 @@ assert any("VSync" in warning for warning in warnings)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(
                     case["runtime_trace"]["commands"],
-                    ["performance", "prepare", "gpu-arm", "gpu-disarm"],
+                    ["performance", "prepare", "gpu-arm", "supervise", "gpu-disarm"],
                 )
                 self.assertTrue(case["runtime_trace"]["umu"])
                 self.assertFalse(case["runtime_trace"]["engine"])
