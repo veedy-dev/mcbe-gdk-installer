@@ -23,14 +23,58 @@ REMOTE_LOGIN_MAX_BYTES = 4096
 REMOTE_LOGIN_HOSTS = {"aka.ms", "microsoft.com", "www.microsoft.com"}
 
 
+def _safe_request_status(status: os.stat_result) -> bool:
+    return (
+        stat.S_ISREG(status.st_mode)
+        and status.st_uid == os.getuid()
+        and status.st_nlink == 1
+    )
+
+
 def clear_remote_login_request(path: Path) -> None:
+    """Create or truncate the request as an owned 0600 regular file.
+
+    Lukas WineGDK opens this path with ``fopen(..., "w")``. Pre-creating it
+    protects the device code without deleting the rendezvous file that the
+    in-game remote-connect flow expects to remain present while it is active.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    flags = (
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_TRUNC
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    try:
+        descriptor = os.open(path, flags, 0o600)
+    except OSError as exc:
+        raise BolError("Could not safely prepare the remote login request.") from exc
+    try:
+        status = os.fstat(descriptor)
+        if not _safe_request_status(status):
+            raise BolError("The remote login request path is unsafe.")
+        os.fchmod(descriptor, 0o600)
+    except OSError as exc:
+        raise BolError("Could not protect the remote login request.") from exc
+    finally:
+        os.close(descriptor)
+
+
+def remove_remote_login_request(path: Path) -> None:
+    """Remove the short-lived request after the supervised game exits."""
     try:
         status = path.lstat()
     except FileNotFoundError:
         return
-    if not stat.S_ISREG(status.st_mode) or status.st_uid != os.getuid():
+    except OSError as exc:
+        raise BolError("Could not inspect the remote login request.") from exc
+    if not _safe_request_status(status):
         raise BolError("The remote login request path is unsafe.")
-    path.unlink()
+    try:
+        path.unlink()
+    except OSError as exc:
+        raise BolError("Could not remove the remote login request.") from exc
 
 
 def read_remote_login_request(path: Path) -> tuple[str, str] | None:
@@ -48,8 +92,7 @@ def read_remote_login_request(path: Path) -> tuple[str, str] | None:
     try:
         status = os.fstat(descriptor)
         if (
-            not stat.S_ISREG(status.st_mode)
-            or status.st_uid != os.getuid()
+            not _safe_request_status(status)
             or status.st_size > REMOTE_LOGIN_MAX_BYTES
         ):
             raise BolError("The remote login request is unsafe.")
