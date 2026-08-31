@@ -17,7 +17,8 @@ case "$SHORTCUT_POLICY" in
 esac
 rm -rf "$ROOT/lib/auth" "$ROOT/lib/bol"
 cp -a "$SOURCE/auth" "$ROOT/lib/auth"
-install -m755 "$SOURCE/scripts/runtime.py" "$ROOT/lib/runtime.py"
+install -m755 "$SOURCE/scripts/runtime.py" "$ROOT/lib/runtime_base.py"
+install -m755 "$SOURCE/scripts/runtime_engine.py" "$ROOT/lib/runtime.py"
 install -m755 "$SOURCE/scripts/gui.py" "$ROOT/lib/gui.py"
 install -m755 "$SOURCE/scripts/gui_engine.py" "$ROOT/lib/gui_engine.py"
 install -m755 "$SOURCE/scripts/updates.py" "$ROOT/lib/updates.py"
