@@ -4,11 +4,20 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Existing vX.Y.Z tag to publish
-        required: true
+        description: Version to publish; defaults to VERSION on the selected ref
+        required: false
+  pull_request:
+    paths:
+      - "VERSION"
+      - ".github/workflows/release.yml"
   push:
+    branches:
+      - main
     tags:
       - "v*"
+    paths:
+      - "VERSION"
+      - ".github/workflows/release.yml"
 
 permissions:
   contents: read
@@ -20,6 +29,8 @@ jobs:
       contents: write
       id-token: write
       attestations: write
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
@@ -27,21 +38,34 @@ jobs:
           persist-credentials: false
 
       - name: Select and validate version
+        shell: bash
         run: |
           if [[ "$GITHUB_REF_TYPE" == tag ]]; then
             version="$GITHUB_REF_NAME"
-          else
+          elif [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && -n "${{ inputs.version }}" ]]; then
             version="${{ inputs.version }}"
+          else
+            version="$(<VERSION)"
           fi
           [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          [[ "$(<VERSION)" == "$version" ]]
-          git rev-parse --verify "refs/tags/$version"
+
+          source_ref="$GITHUB_SHA"
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            git rev-parse --verify "refs/tags/$version"
+            source_ref="$version"
+          elif git rev-parse --verify "refs/tags/$version" >/dev/null 2>&1; then
+            source_ref="$version"
+          fi
+
+          [[ "$(git show "$source_ref:VERSION")" == "$version" ]]
           echo "VERSION=$version" >>"$GITHUB_ENV"
+          echo "SOURCE_REF=$source_ref" >>"$GITHUB_ENV"
 
       - name: Package installer
+        shell: bash
         run: |
-          mkdir dist
-          git archive --format=tar --prefix=mcbe-gdk-installer/ "$VERSION" |
+          mkdir -p dist
+          git archive --format=tar --prefix=mcbe-gdk-installer/ "$SOURCE_REF" |
             gzip -n -9 >"dist/mcbe-gdk-installer-$VERSION.tar.gz"
           (
             cd dist
@@ -50,37 +74,44 @@ jobs:
           )
 
       - name: Attest installer archive
+        if: ${{ github.event_name != 'pull_request' }}
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
         with:
           subject-path: dist/mcbe-gdk-installer-${{ env.VERSION }}.tar.gz
 
       - name: Generate release notes
+        shell: bash
         run: |
-          previous="$(git describe --tags --abbrev=0 "$VERSION^" 2>/dev/null || true)"
+          previous="$(git describe --tags --abbrev=0 "$SOURCE_REF^" 2>/dev/null || true)"
           if [[ -n "$previous" ]]; then
-            range="$previous..$VERSION"
+            git log --oneline --no-merges "$previous..$SOURCE_REF" > release-notes.md
+            printf '\nFull changelog: https://github.com/%s/compare/%s...%s\n' \
+              "$GITHUB_REPOSITORY" "$previous" "$VERSION" >> release-notes.md
           else
-            range="$VERSION"
+            git log --oneline --no-merges "$SOURCE_REF" > release-notes.md
           fi
-          git log --oneline --no-merges "$range" > release-notes.md
-          printf '\nFull changelog: https://github.com/%s/compare/%s\n' \
-            "$GITHUB_REPOSITORY" "$range" >> release-notes.md
 
       - name: Publish release
-        env:
-          GH_TOKEN: ${{ github.token }}
+        if: ${{ github.event_name != 'pull_request' }}
+        shell: bash
         run: |
+          assets=(
+            "dist/mcbe-gdk-installer-$VERSION.tar.gz"
+            "dist/mcbe-gdk-installer-$VERSION.tar.gz.sha256"
+          )
           if gh release view "$VERSION" >/dev/null 2>&1; then
-            gh release upload "$VERSION" \
-              "dist/mcbe-gdk-installer-$VERSION.tar.gz" \
-              "dist/mcbe-gdk-installer-$VERSION.tar.gz.sha256" \
-              --clobber
-            gh release edit "$VERSION" --notes-file release-notes.md
-          else
-            gh release create "$VERSION" \
-              "dist/mcbe-gdk-installer-$VERSION.tar.gz" \
-              "dist/mcbe-gdk-installer-$VERSION.tar.gz.sha256" \
+            gh release upload "$VERSION" "${assets[@]}" --clobber
+            gh release edit "$VERSION" \
+              --notes-file release-notes.md \
+              --title "MCBE GDK Installer $VERSION"
+          elif [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            gh release create "$VERSION" "${assets[@]}" \
               --verify-tag \
+              --notes-file release-notes.md \
+              --title "MCBE GDK Installer $VERSION"
+          else
+            gh release create "$VERSION" "${assets[@]}" \
+              --target "$GITHUB_SHA" \
               --notes-file release-notes.md \
               --title "MCBE GDK Installer $VERSION"
           fi
