@@ -15,12 +15,12 @@ from updates import (  # noqa: E402
     install_custom_engine,
 )
 
-LUKAS_ENGINE_LABEL = "Lukas GDK-Proton 10-32-4 (experimental)"
+LUKAS_ENGINE_LABEL = "MCBE GDK v0.2.0-ex — Lukas in-game login"
 LUKAS_ENGINE_URL = (
-    "https://github.com/LukasPAH/GDK-Proton-Custom/releases/download/"
-    "release-10-32-4/GDK-Proton10-32-Custom-4.tar.gz"
+    "https://github.com/veedy-dev/mcbe-gdk-engine/releases/download/"
+    "v0.2.0-ex/GDK-Proton10-32-Custom-4.tar.gz"
 )
-LUKAS_ENGINE_IDENTITY = "LukasPAH/GDK-Proton-Custom@release-10-32-4"
+LUKAS_ENGINE_IDENTITY = "veedy-dev/mcbe-gdk-engine@v0.2.0-ex"
 
 
 class Window(base.Window):
@@ -34,7 +34,7 @@ class Window(base.Window):
         elif selection == "latest":
             subtitle = f"{installed} installed · tracking latest"
         elif selection == LUKAS_ENGINE_URL:
-            subtitle = f"{installed} installed · experimental Lukas preset selected"
+            subtitle = f"{installed} installed · v0.2.0-ex in-game login selected"
         elif selection.startswith("https://"):
             subtitle = f"{installed} installed · custom GitHub release selected"
         else:
@@ -136,12 +136,13 @@ class Window(base.Window):
             return
 
         dialog = base.Adw.AlertDialog(
-            heading="Use the experimental Lukas engine?",
+            heading="Use MCBE GDK engine v0.2.0-ex?",
             body=(
-                "This downloads a third-party GitHub release whose published "
-                "SHA-256 digest is verified. Microsoft sign-in happens inside "
-                "Minecraft. Parties and Realms are currently unsupported by "
-                "this engine; worlds and installer account data are preserved."
+                "This installs the project's exact SHA-256-pinned mirror of "
+                "Lukas GDK-Proton 10-32-4. Microsoft sign-in happens from "
+                "Minecraft's own Sign In button, not from the launcher or CLI. "
+                "Parties and Realms are currently unsupported; worlds and "
+                "installer account data are preserved."
             ),
         )
         dialog.add_response("cancel", "Cancel")
@@ -167,8 +168,8 @@ class Window(base.Window):
             return
 
         self.begin_update_ui(
-            "Switching to Lukas GDK-Proton 10-32-4…",
-            "Resolving and verifying the exact GitHub release asset.",
+            "Switching to MCBE GDK engine v0.2.0-ex…",
+            "Resolving and verifying the exact mirrored release asset.",
         )
 
         def worker() -> None:
