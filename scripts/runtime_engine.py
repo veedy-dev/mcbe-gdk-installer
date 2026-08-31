@@ -68,6 +68,10 @@ def supervise(umu: Path, game: Path, arguments: list[str]) -> int:
 base.prepare = prepare
 base.supervise = supervise
 
+# scripts/gui.py imports these names from the installed ``runtime`` module.
+login = base.login
+logout = base.logout
+
 
 if __name__ == "__main__":
     raise SystemExit(base.main(sys.argv))
