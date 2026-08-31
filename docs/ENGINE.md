@@ -1,7 +1,7 @@
 # Engine source
 
 WineGDK source, attributed compatibility commits, pinned build inputs, release
-manifests, and automated builds are maintained in
+manifests, and automated stable builds are maintained in
 [veedy-dev/mcbe-gdk-engine](https://github.com/veedy-dev/mcbe-gdk-engine).
 
 The host-side authentication and prefix setup use selected MIT-licensed
@@ -19,30 +19,49 @@ filter. The single archive root must contain executable `proton`,
 `files/bin/wine`, and `files/bin/wineserver` files.
 
 Custom URLs are exact, pinned selections and are not included in automatic
-engine update checks. Selecting `latest` or a `vX.Y.Z` release returns to the
-reviewed `veedy-dev/mcbe-gdk-engine` release stream.
+stable-engine update checks. Selecting `latest` or a `vX.Y.Z` release returns
+to the normal `veedy-dev/mcbe-gdk-engine` release stream.
 
-Assets from the `LukasPAH/GDK-Proton-Custom` repository are assigned the Lukas
-profile by repository name. Every selected asset still has its GitHub-published
-SHA-256 digest verified before installation. Installer-owned capability
-metadata determines runtime behavior; hashes of the transformed Proton, Wine,
-wineserver, and available xgameruntime files detect later modification.
+## v0.2.0-ex: Lukas in-game sign-in experiment
 
-The Lukas profile:
+The maintained GTK interface exposes one reviewed custom preset:
 
-- patches the engine's Gaming Services version gate during installation;
+- repository: `veedy-dev/mcbe-gdk-engine`
+- release: `v0.2.0-ex`
+- asset: `GDK-Proton10-32-Custom-4.tar.gz`
+- SHA-256: `4d19774c64451d4f1395dc4c5f4b6e8b5fdbc1ce6c05e29a855f5e0678b8800c`
+
+That release is a byte-for-byte mirror of
+`LukasPAH/GDK-Proton-Custom@release-10-32-4`. The profile activates only when
+the repository, tag, asset name, digest, profile identifier, and serialized
+capabilities all match. Future releases do not silently inherit the profile.
+
+The `v0.2.0-ex` profile:
+
+- leaves the mirrored `xgameruntime.dll` unchanged;
+- transactionally sets WineGDK's existing
+  `Software\\Microsoft\\GamingServices/IgnoreVersionMismatch` registry value
+  before launch and removes it when a different engine is prepared;
 - transactionally creates or updates `MicrosoftGame.Config` with the required
   Android identity and keeps original files under `profile/engine-state/`;
 - reversibly disables the incompatible Windows App Runtime bootstrap DLL;
-- validates `login.json`, opens the browser, and displays a copyable sign-in
-  code while a Python supervisor owns both the monitor and game process;
+- starts Microsoft authentication only after the user selects **Sign In**
+  inside Minecraft;
+- pre-creates `login.json` as an owned `0600` regular file, validates the
+  verification URL and code, and preserves the rendezvous file while the game
+  listens;
+- opens or displays the device-code prompt while a Python supervisor owns the
+  monitor and game process, then removes `login.json` when the game exits;
 - uses a protected `profile/device-code.txt` fallback when no dialog,
-  notification, or terminal presentation is available;
+  notification, clipboard, or terminal presentation is available;
 - applies or restores game changes during engine switching and again before
   launch for interrupted-operation recovery.
 
-For custom engines, `mcbe-gdk-linux login`, `logout`, and `status` explain that
-account control is engine-managed and return status 3 rather than reporting a
-state they cannot observe. Other custom engines remain publisher-managed. The
-launcher continues applying its XCurl payload and CA certificates to every
-supported engine.
+For this engine, `mcbe-gdk-linux login`, `logout`, and `status` explain that
+account control is handled from Minecraft's Profile UI and return status 3
+rather than reporting a state the launcher cannot observe. The launcher still
+applies its XCurl payload and CA certificates.
+
+The upstream engine currently reports that Parties and Realms are unsupported.
+Keep a stable engine release available while comparing performance and feature
+behavior.
