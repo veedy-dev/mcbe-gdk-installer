@@ -16,7 +16,7 @@ Minecraft Bedrock GDK builds installer on Linux with working Xbox authentication
 - Notifies you about installer and compatibility-engine updates
 - Decrypts `/LT` test-crypted development packages entirely on Linux
 - Installs the latest verified MCBE-compatible GDK-Proton xuser engine
-- Supports optional Microsoft device-code sign-in for Xbox services
+- Supports launcher device-code sign-in and an experimental in-game sign-in engine
 - Launches through `umu`
 - Keeps its profile separate from other Minecraft installations
 - Installs XDG entries for the installer and Minecraft Bedrock
@@ -31,13 +31,14 @@ Minecraft Bedrock GDK builds installer on Linux with working Xbox authentication
 ### Command-line installation and launch
 
 - x86_64 Linux
-- Python 3 (`cryptography` is only needed for Xbox sign-in)
+- Python 3 (`cryptography` is only needed for the stable engine's Xbox sign-in)
 - `curl`, `tar`, `sha256sum`, and `flock`
 - `unzip` and `7z` only when installing from a package
 
-You can install the game, sign in, and launch it entirely from the terminal.
-GTK is not required. The login command always prints the Microsoft sign-in URL
-and code.
+You can install and launch the game entirely from the terminal. With the stable
+engine, the login command prints the Microsoft sign-in URL and code. The
+experimental `v0.2.0-ex` engine instead starts authentication from Minecraft's
+own **Sign In** button.
 
 ### Optional desktop UI
 
@@ -112,15 +113,17 @@ For terminal-only use, choose one of the methods below instead.
 ## Use
 
 Choose the authorized `.zip`, `.msixvc`, or `.msixv`, then click **Install**.
-The installer selects the latest engine release, verifies its checksum, extracts
-the public GDK test key locally, decrypts the package, and installs it.
+The installer selects the latest stable engine release, verifies its checksum,
+extracts the public GDK test key locally, decrypts the package, and installs it.
 The first run temporarily downloads the official Microsoft GDK archive.
 Installing a newer build replaces only the game files; the isolated account,
 worlds, and profile data are preserved.
 
-Click **Launch** to play without connecting an account. For Xbox services and
-multiplayer, click **Sign in**, then scan the QR code or enter the displayed
-Microsoft device code.
+With the stable engine, click **Sign in** in the installer and complete the
+displayed Microsoft device-code flow. With `v0.2.0-ex`, launch Minecraft and
+select **Sign In** inside the game. The launcher supervises the engine's
+`login.json` request and presents the Microsoft URL and code without moving the
+actual authentication back into the launcher or CLI.
 
 When an installer or engine update is available, an update row appears above
 the Package section. Select **Update** to review the release changelog, then choose
@@ -151,34 +154,49 @@ Already have the Minecraft game files? Follow
 Rerun the same installation command after `git pull` to update an existing
 installation.
 
-The latest engine release is selected by default. Use
+The latest stable engine release is selected by default. Use
 `mcbe-gdk-linux engine 0.1.5` to switch to `v0.1.5` without reinstalling the
 game, or pick a release from the Compatibility engine selector in the setup
 UI. Versions may include or omit the `v`; use `latest` to resume tracking new
-engine releases.
+stable engine releases.
 
-Compatible custom Proton engines can be installed from an HTTPS GitHub release
-asset URL:
+### Experimental Lukas engine: v0.2.0-ex
+
+The setup UI exposes **MCBE GDK v0.2.0-ex — Lukas in-game login**. This is the
+project's exact mirror of the tested Lukas GDK-Proton 10-32-4 archive. The
+release remains byte-for-byte identical to the upstream asset and is pinned to
+SHA-256:
+
+```text
+4d19774c64451d4f1395dc4c5f4b6e8b5fdbc1ce6c05e29a855f5e0678b8800c
+```
+
+It can also be selected from the terminal using its exact release asset:
 
 ```bash
 mcbe-gdk-linux engine \
-  'https://github.com/LukasPAH/GDK-Proton-Custom/releases/download/release-10-32-4/GDK-Proton10-32-Custom-4.tar.gz'
+  'https://github.com/veedy-dev/mcbe-gdk-engine/releases/download/v0.2.0-ex/GDK-Proton10-32-Custom-4.tar.gz'
 ```
 
-The installer resolves the asset through GitHub's release API, verifies its
-GitHub-published SHA-256 digest, limits compressed and expanded sizes, rejects
-unsafe archive members, and extracts through one validated tar implementation.
-It records hashes for the transformed runtime files and revalidates them before
-treating an installation as ready.
+The installer resolves the asset through GitHub's release API, verifies the
+published digest, limits compressed and expanded sizes, rejects unsafe archive
+members, and revalidates critical installed files. The exact `v0.2.0-ex`
+profile transactionally applies the Minecraft title identity, the Windows App
+Runtime workaround, and WineGDK's documented Gaming Services registry override.
+It does not byte-patch the mirrored `xgameruntime.dll`.
 
-Releases from `LukasPAH/GDK-Proton-Custom` receive the declarative Lukas
-profile: Gaming Services compatibility patch when needed, transactional
-Minecraft identity setup, reversible Windows App Runtime workaround, and an
-automatic Microsoft device-code prompt supervised with the game process. Other
-external engines remain publisher-managed.
+For this engine, `mcbe-gdk-linux login`, `logout`, and `status` do not manage the
+account. Launch Minecraft, use its Profile/Sign In controls, and complete the
+remote device-code prompt generated by the game. The private `login.json`
+rendezvous file is preserved while the game listens and removed after the
+supervised process exits.
+
+The upstream release currently reports that **Parties and Realms are not
+supported**. Keep the stable engine available while comparing launch time,
+server join time, frame pacing, and server tick time.
 
 The selection persists across normal updates. For unattended initial installs,
-set `MCBE_GDK_ENGINE_RELEASE=vX.Y.Z`.
+set `MCBE_GDK_ENGINE_RELEASE` to the complete `v0.2.0-ex` asset URL above.
 
 ## Commands
 
@@ -188,9 +206,10 @@ set `MCBE_GDK_ENGINE_RELEASE=vX.Y.Z`.
 | Open setup UI | `./gui.sh` or `mcbe-gdk-linux gui` |
 | Package-to-Linux setup | `./easy-install.sh /path/to/mcbe-gdk-build.msixvc` |
 | Launch Minecraft | `mcbe-gdk-linux launch` or `mcbe-gdk-linux` |
-| Check Xbox account | `mcbe-gdk-linux status` |
-| Sign in | `mcbe-gdk-linux login` |
-| Sign out | `mcbe-gdk-linux logout` |
+| Stable-engine account status | `mcbe-gdk-linux status` |
+| Stable-engine sign in | `mcbe-gdk-linux login` |
+| Stable-engine sign out | `mcbe-gdk-linux logout` |
+| `v0.2.0-ex` sign in/out | Use the Profile controls inside Minecraft |
 | Install available updates | `mcbe-gdk-linux update` |
 | Show or switch engine | `mcbe-gdk-linux engine [VERSION\|latest\|GITHUB_ASSET_URL]` |
 | Recover after GPU troubleshooting | `mcbe-gdk-linux recover` |
@@ -206,9 +225,11 @@ set `MCBE_GDK_ENGINE_RELEASE=vX.Y.Z`.
 
 ## Engine source
 
-The compatibility engine source, build workflow, and release provenance live in
-[mcbe-gdk-engine](https://github.com/veedy-dev/mcbe-gdk-engine).
-Authentication and prefix setup use a pinned, MIT-licensed subset of
+The stable compatibility engine source, build workflow, and release provenance
+live in [mcbe-gdk-engine](https://github.com/veedy-dev/mcbe-gdk-engine).
+`v0.2.0-ex` is explicitly published there as an exact experimental upstream
+binary mirror with its own checksum and provenance record. Authentication and
+prefix setup use a pinned, MIT-licensed subset of
 [BedrockOnLinux](https://github.com/Wyze3306/BedrockOnLinux). Its launcher,
 AppImage, GUI, and game-management code are not installed.
 
