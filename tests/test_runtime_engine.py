@@ -69,6 +69,8 @@ class ExperimentalRuntimeIntegrationTest(unittest.TestCase):
         ast.parse(wrapper)
         self.assertIn("IgnoreVersionMismatch", wrapper)
         self.assertIn("remove_remote_login_request", wrapper)
+        self.assertIn("login = base.login", wrapper)
+        self.assertIn("logout = base.logout", wrapper)
 
         installer = (repo / "scripts/install-launchers.sh").read_text(
             encoding="utf-8"
