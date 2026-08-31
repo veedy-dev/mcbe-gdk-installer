@@ -9,7 +9,9 @@ from pathlib import Path
 try:
     # Managed installations keep the original implementation under this name.
     import runtime_base as base
-except ImportError:  # Source-tree execution.
+except ModuleNotFoundError as exc:  # Source-tree execution.
+    if exc.name != "runtime_base":
+        raise
     import runtime as base
 
 from auth.engine_profiles import installed_engine_profile
