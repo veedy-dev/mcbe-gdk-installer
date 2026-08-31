@@ -16,10 +16,19 @@ USAGE
 }
 
 INSTALL_MODE=""
+set_install_mode() {
+  local requested="$1"
+  if [[ -n "$INSTALL_MODE" && "$INSTALL_MODE" != "$requested" ]]; then
+    echo "Choose only one install mode: --gui or --cli." >&2
+    exit 2
+  fi
+  INSTALL_MODE="$requested"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --gui) INSTALL_MODE="gui" ;;
-    --cli) INSTALL_MODE="cli" ;;
+    --gui) set_install_mode gui ;;
+    --cli) set_install_mode cli ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -27,13 +36,14 @@ while [[ $# -gt 0 ]]; do
 done
 
 select_install_mode() {
-  local input output choice
+  local input output choice using_tty=0
   if [[ -t 0 ]]; then
     input="/dev/stdin"
     output="/dev/stdout"
-  elif [[ -r /dev/tty && -w /dev/tty ]]; then
-    input="/dev/tty"
-    output="/dev/tty"
+  elif { exec 3<>/dev/tty; } 2>/dev/null; then
+    input="/dev/fd/3"
+    output="/dev/fd/3"
+    using_tty=1
   else
     INSTALL_MODE="gui"
     return
@@ -48,8 +58,16 @@ Choose [1]:
 PROMPT
     IFS= read -r choice <"$input" || choice=""
     case "${choice,,}" in
-      ""|1|g|gui) INSTALL_MODE="gui"; return ;;
-      2|c|cli) INSTALL_MODE="cli"; return ;;
+      ""|1|g|gui)
+        INSTALL_MODE="gui"
+        if (( using_tty )); then exec 3>&-; fi
+        return
+        ;;
+      2|c|cli)
+        INSTALL_MODE="cli"
+        if (( using_tty )); then exec 3>&-; fi
+        return
+        ;;
       *) echo "Enter 1 for GUI or 2 for CLI." >"$output" ;;
     esac
   done
@@ -217,6 +235,8 @@ echo "Installing MCBE GDK launchers..."
 launcher_args=("$ROOT" "$SOURCE_DIR")
 if [[ "$INSTALL_MODE" == "cli" ]]; then
   launcher_args+=(--no-gui)
+else
+  launcher_args+=(--gui)
 fi
 "$SOURCE_DIR/scripts/install-launchers.sh" "${launcher_args[@]}"
 
