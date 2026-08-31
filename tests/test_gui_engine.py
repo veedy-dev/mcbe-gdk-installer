@@ -14,11 +14,12 @@ class GuiEngineIntegrationTest(unittest.TestCase):
     def test_entrypoint_is_valid_python_and_pins_reviewed_release(self):
         ast.parse(self.source, filename=str(self.entrypoint))
         self.assertIn(
-            "release-10-32-4/GDK-Proton10-32-Custom-4.tar.gz",
+            "v0.2.0-ex/GDK-Proton10-32-Custom-4.tar.gz",
             self.source,
         )
-        self.assertIn("(experimental)", self.source)
+        self.assertIn("MCBE GDK v0.2.0-ex", self.source)
         self.assertIn("Parties and Realms are currently unsupported", self.source)
+        self.assertIn("sign-in happens from", self.source)
 
     def test_source_and_installed_launchers_use_engine_aware_gui(self):
         source_launcher = (self.repo / "gui.sh").read_text(encoding="utf-8")
