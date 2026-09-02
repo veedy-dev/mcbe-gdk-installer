@@ -23,7 +23,7 @@ EXPERIMENTAL_ENGINE_ASSET = (
     "GDK-Proton-mcbe-gdk-v0.2.0-experimental.tar.gz"
 )
 EXPERIMENTAL_ENGINE_SHA256 = (
-    "9a1eb32df68cbf66fc34ff153d847a8bd1a19e7304912a26b484a1f3db192f20"
+    "92b767dbd3bb08bf8bcac4d75147d9cf53514d96d378f2efc2806a2b9fb4a3ee"
 )
 
 

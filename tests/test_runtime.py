@@ -568,8 +568,10 @@ else:
             umu = root / "umu.py"
             umu.write_text(
                 """import json
+import os
 import time
 from pathlib import Path
+assert os.environ.get("MCBE_GDK_REMOTE_CONNECT") == "1"
 Path(__file__).with_name("login.json").write_text(json.dumps({
     "verification_uri": "https://www.microsoft.com/link",
     "user_code": "ABCD-1234",

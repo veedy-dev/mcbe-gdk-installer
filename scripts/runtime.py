@@ -267,8 +267,11 @@ def supervise(umu: Path, game: Path, arguments: list[str]) -> int:
     stop_event = Event()
     monitor_thread: Thread | None = None
     fallback = ROOT / "profile" / "device-code.txt"
+    child_env = os.environ.copy()
+    child_env.pop("MCBE_GDK_REMOTE_CONNECT", None)
 
     if profile and profile.authentication == "remote-connect-json":
+        child_env["MCBE_GDK_REMOTE_CONNECT"] = "1"
         request = login_request_path(game.parent, profile)
         clear_remote_login_request(request)
 
@@ -299,6 +302,7 @@ def supervise(umu: Path, game: Path, arguments: list[str]) -> int:
         child = subprocess.Popen(
             [sys.executable, str(umu), str(game), *arguments],
             cwd=game.parent,
+            env=child_env,
             start_new_session=True,
         )
     except Exception:
