@@ -124,7 +124,6 @@ ntsync_preflight
 performance_output="$(python3 "$RUNTIME" performance 2>> "$LOG" || true)"
 if [[ -n "$performance_output" ]]; then
   printf '%s\n' "$performance_output" >> "$LOG"
-  notify 'Performance settings may slow Minecraft' "See $LOG"
 fi
 
 # Custom engines are intentionally outside BOL's managed-engine cache path.

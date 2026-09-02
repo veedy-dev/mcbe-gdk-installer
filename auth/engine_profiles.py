@@ -17,6 +17,14 @@ LUKAS_EXPERIMENTAL_ASSET = "GDK-Proton10-32-Custom-4.tar.gz"
 LUKAS_EXPERIMENTAL_SHA256 = (
     "4d19774c64451d4f1395dc4c5f4b6e8b5fdbc1ce6c05e29a855f5e0678b8800c"
 )
+EXPERIMENTAL_ENGINE_PROFILE_ID = "mcbe-v0.2.0-experimental-v1"
+EXPERIMENTAL_ENGINE_TAG = "v0.2.0-experimental"
+EXPERIMENTAL_ENGINE_ASSET = (
+    "GDK-Proton-mcbe-gdk-v0.2.0-experimental.tar.gz"
+)
+EXPERIMENTAL_ENGINE_SHA256 = (
+    "9a1eb32df68cbf66fc34ff153d847a8bd1a19e7304912a26b484a1f3db192f20"
+)
 
 
 @dataclass(frozen=True)
@@ -48,8 +56,8 @@ class EngineProfile:
         }
 
 
-# Retained for compatibility with Djaka's direct-upstream implementation and
-# tests. The maintainer GUI uses the exact project mirror profile below.
+# Generic direct-upstream profile retained for existing custom selections and
+# tests. Its legacy runtime requires the narrowly scoped byte patch below.
 LUKAS_ENGINE_PROFILE = EngineProfile(
     identifier=LUKAS_ENGINE_PROFILE_ID,
     repository="LukasPAH/GDK-Proton-Custom",
@@ -61,9 +69,8 @@ LUKAS_ENGINE_PROFILE = EngineProfile(
     patch_gaming_services_gate=True,
 )
 
-# Exact byte-for-byte mirror published by veedy-dev/mcbe-gdk-engine. This path
-# deliberately leaves xgameruntime.dll unchanged and uses the registry escape
-# hatch already implemented by WineGDK for the Gaming Services version gate.
+# Legacy project mirror retained so an existing installation can still restore
+# its profile. It is no longer exposed as a selectable preset.
 LUKAS_EXPERIMENTAL_PROFILE = EngineProfile(
     identifier=LUKAS_EXPERIMENTAL_PROFILE_ID,
     repository="veedy-dev/mcbe-gdk-engine",
@@ -79,15 +86,45 @@ LUKAS_EXPERIMENTAL_PROFILE = EngineProfile(
     ignore_gaming_services_version=True,
 )
 
-_PROFILES = (LUKAS_ENGINE_PROFILE, LUKAS_EXPERIMENTAL_PROFILE)
-_PROFILES_BY_REPOSITORY = {
-    profile.repository.casefold(): profile for profile in _PROFILES
-}
+# Source-built experimental profile with the Gaming Services gate fixed in the
+# maintained engine source and verified by the pinned release build.
+EXPERIMENTAL_ENGINE_PROFILE = EngineProfile(
+    identifier=EXPERIMENTAL_ENGINE_PROFILE_ID,
+    repository="veedy-dev/mcbe-gdk-engine",
+    authentication="remote-connect-json",
+    msa_app_id="0000000048183522",
+    title_id="67b57dac",
+    disable_app_runtime_bootstrap=True,
+    login_request_parent_levels=1,
+    patch_gaming_services_gate=False,
+    tag=EXPERIMENTAL_ENGINE_TAG,
+    asset=EXPERIMENTAL_ENGINE_ASSET,
+    sha256=EXPERIMENTAL_ENGINE_SHA256,
+    ignore_gaming_services_version=True,
+)
+
+_PROFILES = (
+    LUKAS_ENGINE_PROFILE,
+    LUKAS_EXPERIMENTAL_PROFILE,
+    EXPERIMENTAL_ENGINE_PROFILE,
+)
 _PROFILES_BY_ID = {profile.identifier: profile for profile in _PROFILES}
 
 
-def profile_for_repository(repository: str) -> EngineProfile | None:
-    return _PROFILES_BY_REPOSITORY.get(repository.casefold())
+def profile_for_asset(
+    repository: str, tag: str, asset: str, sha256: str
+) -> EngineProfile | None:
+    for profile in _PROFILES:
+        if profile.repository.casefold() != repository.casefold():
+            continue
+        if profile.tag is not None and profile.tag != tag:
+            continue
+        if profile.asset is not None and profile.asset != asset:
+            continue
+        if profile.sha256 is not None and profile.sha256 != sha256:
+            continue
+        return profile
+    return None
 
 
 def read_custom_engine_metadata(root: Path) -> dict[str, Any] | None:

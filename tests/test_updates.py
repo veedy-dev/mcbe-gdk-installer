@@ -14,6 +14,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 os.environ.setdefault("MCBE_GDK_ROOT", "/tmp/mcbe-gdk-update-tests")
 
+from auth.engine_profiles import (  # noqa: E402
+    EXPERIMENTAL_ENGINE_PROFILE,
+    LUKAS_EXPERIMENTAL_PROFILE,
+)
+
 from updates import (  # noqa: E402
     ENGINE_REPO,
     INSTALLER_REPO,
@@ -395,6 +400,39 @@ class UpdateTests(unittest.TestCase):
             profile = _apply_custom_engine_profile(source, asset)
 
         self.assertEqual(profile.identifier, "lukas-remote-connect-v1")
+
+    def test_project_profiles_are_selected_by_exact_asset(self):
+        for expected in (
+            LUKAS_EXPERIMENTAL_PROFILE,
+            EXPERIMENTAL_ENGINE_PROFILE,
+        ):
+            with self.subTest(profile=expected.identifier):
+                asset = CustomEngineAsset(
+                    repo=expected.repository,
+                    tag=expected.tag,
+                    name=expected.asset,
+                    url=(
+                        f"https://github.com/{expected.repository}/releases/download/"
+                        f"{expected.tag}/{expected.asset}"
+                    ),
+                    sha256=expected.sha256,
+                )
+                with tempfile.TemporaryDirectory() as temporary:
+                    profile = _apply_custom_engine_profile(Path(temporary), asset)
+                self.assertEqual(profile, expected)
+
+                wrong_digest = CustomEngineAsset(
+                    repo=asset.repo,
+                    tag=asset.tag,
+                    name=asset.name,
+                    url=asset.url,
+                    sha256="0" * 64,
+                )
+                with tempfile.TemporaryDirectory() as temporary:
+                    profile = _apply_custom_engine_profile(
+                        Path(temporary), wrong_digest
+                    )
+                self.assertIsNone(profile)
 
     def test_checksum_and_archive_paths_are_verified(self):
         with tempfile.TemporaryDirectory() as temporary:

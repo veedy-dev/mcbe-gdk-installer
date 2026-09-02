@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GTK integration for reviewed external compatibility-engine presets."""
+"""GTK integration for the reviewed experimental compatibility engine."""
 
 from __future__ import annotations
 
@@ -15,16 +15,16 @@ from updates import (  # noqa: E402
     install_custom_engine,
 )
 
-LUKAS_ENGINE_LABEL = "MCBE GDK v0.2.0-ex — Lukas in-game login"
-LUKAS_ENGINE_URL = (
+EXPERIMENTAL_ENGINE_LABEL = "MCBE GDK v0.2.0-experimental"
+EXPERIMENTAL_ENGINE_URL = (
     "https://github.com/veedy-dev/mcbe-gdk-engine/releases/download/"
-    "v0.2.0-ex/GDK-Proton10-32-Custom-4.tar.gz"
+    "v0.2.0-experimental/GDK-Proton-mcbe-gdk-v0.2.0-experimental.tar.gz"
 )
-LUKAS_ENGINE_IDENTITY = "veedy-dev/mcbe-gdk-engine@v0.2.0-ex"
+EXPERIMENTAL_ENGINE_IDENTITY = "veedy-dev/mcbe-gdk-engine@v0.2.0-experimental"
 
 
 class Window(base.Window):
-    """Add the reviewed Lukas preset without weakening the normal release UI."""
+    """Add the reviewed experiment without weakening the stable release UI."""
 
     def refresh_engine_row(self) -> None:
         installed = base.read_engine_version(base.ROOT) or "not installed"
@@ -33,8 +33,8 @@ class Window(base.Window):
             subtitle = f"{installed} installed · selection unavailable"
         elif selection == "latest":
             subtitle = f"{installed} installed · tracking latest"
-        elif selection == LUKAS_ENGINE_URL:
-            subtitle = f"{installed} installed · v0.2.0-ex in-game login selected"
+        elif selection == EXPERIMENTAL_ENGINE_URL:
+            subtitle = f"{installed} installed · v0.2.0-experimental selected"
         elif selection.startswith("https://"):
             subtitle = f"{installed} installed · custom GitHub release selected"
         else:
@@ -44,10 +44,10 @@ class Window(base.Window):
         self.engine_row.set_subtitle(subtitle)
 
     def populate_engine_combo(self, selected: str) -> None:
-        entries = ["Latest", LUKAS_ENGINE_LABEL]
+        entries = ["Latest", EXPERIMENTAL_ENGINE_LABEL]
         values = {
             "Latest": "latest",
-            LUKAS_ENGINE_LABEL: LUKAS_ENGINE_URL,
+            EXPERIMENTAL_ENGINE_LABEL: EXPERIMENTAL_ENGINE_URL,
         }
         for tag in self.engine_tags[: self.engine_visible_count]:
             entries.append(tag)
@@ -134,13 +134,12 @@ class Window(base.Window):
                 "Engine files cannot be replaced while Minecraft is running.",
             )
             return
-
         dialog = base.Adw.AlertDialog(
-            heading="Use MCBE GDK engine v0.2.0-ex?",
+            heading="Use MCBE GDK v0.2.0-experimental?",
             body=(
-                "This installs the project's exact SHA-256-pinned mirror of "
-                "Lukas GDK-Proton 10-32-4. Microsoft sign-in happens from "
-                "Minecraft's own Sign In button, not from the launcher or CLI. "
+                "This installs the project's source-built, SHA-256-verified "
+                "experimental engine. Microsoft sign-in happens from Minecraft's "
+                "own Sign In button, not from the launcher or CLI. "
                 "Parties and Realms are currently unsupported; worlds and "
                 "installer account data are preserved."
             ),
@@ -168,8 +167,8 @@ class Window(base.Window):
             return
 
         self.begin_update_ui(
-            "Switching to MCBE GDK engine v0.2.0-ex…",
-            "Resolving and verifying the exact mirrored release asset.",
+            "Switching to MCBE GDK v0.2.0-experimental…",
+            "Resolving and verifying the experimental release asset.",
         )
 
         def worker() -> None:
@@ -190,7 +189,7 @@ class Window(base.Window):
                     (base.ROOT / ENGINE_SELECTION_FILE).write_text(
                         selected + "\n", encoding="utf-8"
                     )
-                self.events.put(("engine_switch_done", LUKAS_ENGINE_IDENTITY))
+                self.events.put(("engine_switch_done", EXPERIMENTAL_ENGINE_IDENTITY))
             except Exception as exc:
                 self.events.put(("engine_switch_error", str(exc)))
 

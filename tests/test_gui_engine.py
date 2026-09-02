@@ -14,10 +14,14 @@ class GuiEngineIntegrationTest(unittest.TestCase):
     def test_entrypoint_is_valid_python_and_pins_reviewed_release(self):
         ast.parse(self.source, filename=str(self.entrypoint))
         self.assertIn(
-            "v0.2.0-ex/GDK-Proton10-32-Custom-4.tar.gz",
+            "v0.2.0-experimental/GDK-Proton-mcbe-gdk-v0.2.0-experimental.tar.gz",
             self.source,
         )
-        self.assertIn("MCBE GDK v0.2.0-ex", self.source)
+        self.assertIn(
+            'EXPERIMENTAL_ENGINE_LABEL = "MCBE GDK v0.2.0-experimental"',
+            self.source,
+        )
+        self.assertNotIn("Lukas in-game login", self.source)
         self.assertIn("Parties and Realms are currently unsupported", self.source)
         self.assertIn("sign-in happens from", self.source)
 

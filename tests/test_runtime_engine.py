@@ -1,4 +1,4 @@
-"""Focused tests for the v0.2.0-ex in-game login integration."""
+"""Focused tests for experimental in-game login integration."""
 
 import ast
 import json
@@ -9,6 +9,7 @@ from pathlib import Path
 
 from auth.engine_profiles import (
     CUSTOM_ENGINE_METADATA,
+    EXPERIMENTAL_ENGINE_PROFILE,
     LUKAS_EXPERIMENTAL_PROFILE,
     installed_engine_profile,
 )
@@ -19,34 +20,44 @@ from auth.remote_login import (
 
 
 class ExperimentalRuntimeIntegrationTest(unittest.TestCase):
-    def test_profile_requires_the_exact_mirrored_release(self):
+    def test_profiles_require_their_exact_releases(self):
+        profiles = (
+            (
+                EXPERIMENTAL_ENGINE_PROFILE,
+                "https://github.com/veedy-dev/mcbe-gdk-engine/releases/"
+                "download/v0.2.0-experimental/"
+                "GDK-Proton-mcbe-gdk-v0.2.0-experimental.tar.gz",
+            ),
+            (
+                LUKAS_EXPERIMENTAL_PROFILE,
+                "https://github.com/veedy-dev/mcbe-gdk-engine/releases/"
+                "download/v0.2.0-ex/GDK-Proton10-32-Custom-4.tar.gz",
+            ),
+        )
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             metadata_path = (
                 root / "engine/GDK-Proton-mcbe-gdk" / CUSTOM_ENGINE_METADATA
             )
             metadata_path.parent.mkdir(parents=True)
-            metadata = {
-                "schema": 2,
-                "profile": LUKAS_EXPERIMENTAL_PROFILE.identifier,
-                "repository": LUKAS_EXPERIMENTAL_PROFILE.repository,
-                "tag": LUKAS_EXPERIMENTAL_PROFILE.tag,
-                "asset": LUKAS_EXPERIMENTAL_PROFILE.asset,
-                "url": (
-                    "https://github.com/veedy-dev/mcbe-gdk-engine/releases/"
-                    "download/v0.2.0-ex/GDK-Proton10-32-Custom-4.tar.gz"
-                ),
-                "sha256": LUKAS_EXPERIMENTAL_PROFILE.sha256,
-                "capabilities": LUKAS_EXPERIMENTAL_PROFILE.capabilities(),
-            }
-            metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
-            self.assertEqual(
-                installed_engine_profile(root), LUKAS_EXPERIMENTAL_PROFILE
-            )
+            for profile, url in profiles:
+                with self.subTest(profile=profile.identifier):
+                    metadata = {
+                        "schema": 2,
+                        "profile": profile.identifier,
+                        "repository": profile.repository,
+                        "tag": profile.tag,
+                        "asset": profile.asset,
+                        "url": url,
+                        "sha256": profile.sha256,
+                        "capabilities": profile.capabilities(),
+                    }
+                    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+                    self.assertEqual(installed_engine_profile(root), profile)
 
-            metadata["tag"] = "v0.2.1-ex"
-            metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
-            self.assertIsNone(installed_engine_profile(root))
+                    metadata["sha256"] = "0" * 64
+                    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+                    self.assertIsNone(installed_engine_profile(root))
 
     def test_login_request_is_precreated_private_and_removed_afterwards(self):
         with tempfile.TemporaryDirectory() as temporary:

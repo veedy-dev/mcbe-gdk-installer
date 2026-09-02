@@ -22,26 +22,26 @@ Custom URLs are exact, pinned selections and are not included in automatic
 stable-engine update checks. Selecting `latest` or a `vX.Y.Z` release returns
 to the normal `veedy-dev/mcbe-gdk-engine` release stream.
 
-## v0.2.0-ex: Lukas in-game sign-in experiment
+## v0.2.0-experimental
 
 The maintained GTK interface exposes one reviewed custom preset:
 
 - repository: `veedy-dev/mcbe-gdk-engine`
-- release: `v0.2.0-ex`
-- asset: `GDK-Proton10-32-Custom-4.tar.gz`
-- SHA-256: `4d19774c64451d4f1395dc4c5f4b6e8b5fdbc1ce6c05e29a855f5e0678b8800c`
+- release: `v0.2.0-experimental`
+- asset: `GDK-Proton-mcbe-gdk-v0.2.0-experimental.tar.gz`
 
-That release is a byte-for-byte mirror of
-`LukasPAH/GDK-Proton-Custom@release-10-32-4`. The profile activates only when
-the repository, tag, asset name, digest, profile identifier, and serialized
-capabilities all match. Future releases do not silently inherit the profile.
+This prerelease is built from the maintained public source and pinned engine
+inputs. Its manifest records the exact source commit and critical runtime
+hashes. The profile activates only when the repository, tag, asset name,
+GitHub digest, profile identifier, and serialized capabilities all match.
 
-The `v0.2.0-ex` profile:
+The experimental profile:
 
-- leaves the mirrored `xgameruntime.dll` unchanged;
-- transactionally sets WineGDK's existing
+- transactionally sets WineGDK's
   `Software\\Microsoft\\GamingServices/IgnoreVersionMismatch` registry value
   before launch and removes it when a different engine is prepared;
+- uses the fixed DWORD reader covered by the engine's focused `xgameruntime`
+  test for missing, wrong-type, zero, and enabled values;
 - transactionally creates or updates `MicrosoftGame.Config` with the required
   Android identity and keeps original files under `profile/engine-state/`;
 - reversibly disables the incompatible Windows App Runtime bootstrap DLL;
@@ -62,6 +62,5 @@ account control is handled from Minecraft's Profile UI and return status 3
 rather than reporting a state the launcher cannot observe. The launcher still
 applies its XCurl payload and CA certificates.
 
-The upstream engine currently reports that Parties and Realms are unsupported.
-Keep a stable engine release available while comparing performance and feature
-behavior.
+Parties and Realms remain unsupported. Keep a stable engine release available
+while comparing performance and feature behavior.

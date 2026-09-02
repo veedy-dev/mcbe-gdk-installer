@@ -22,7 +22,7 @@ from urllib.request import Request, urlopen
 from auth.engine_profiles import (
     CUSTOM_ENGINE_METADATA,
     EngineProfile,
-    profile_for_repository,
+    profile_for_asset,
     read_custom_engine_metadata,
 )
 from auth.game_profile import apply_installed_engine_profile
@@ -572,7 +572,7 @@ def _custom_engine_is_ready(root: Path, asset: CustomEngineAsset) -> bool:
 def _apply_custom_engine_profile(
     source: Path, asset: CustomEngineAsset
 ) -> EngineProfile | None:
-    profile = profile_for_repository(asset.repo)
+    profile = profile_for_asset(asset.repo, asset.tag, asset.name, asset.sha256)
     if not profile:
         return None
     if not profile.patch_gaming_services_gate:
