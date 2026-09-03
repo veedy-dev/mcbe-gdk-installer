@@ -160,6 +160,7 @@ engine profiles apply.
 | `mcbe-gdk-linux update` | Install available installer and engine updates |
 | `mcbe-gdk-linux engine [VERSION\|latest\|URL]` | Show or switch the compatibility engine |
 | `mcbe-gdk-linux login` / `logout` / `status` | Launcher account commands for older engines |
+| `mcbe-gdk-linux recover` | Allow launching again after an interrupted GPU session (see [Troubleshooting](docs/TROUBLESHOOTING.md)) |
 | `mcbe-gdk-linux setup-env` | Print the `COM_MOJANG` environment command |
 | `mcbe-gdk-linux help` | Show all commands |
 | `./uninstall.sh` | Remove launchers and shortcuts |
