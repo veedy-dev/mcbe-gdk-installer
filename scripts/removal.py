@@ -7,6 +7,7 @@ import os
 import signal
 import shutil
 import subprocess
+import sys
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -134,3 +135,46 @@ def remove_minecraft(root: Path, remove_user_data: bool = False) -> None:
             for entry in profile.iterdir():
                 if entry.name != LOCK_NAME:
                     _remove(entry)
+
+
+def main(argv: list[str]) -> int:
+    usage = f"Usage: {argv[0]} ROOT uninstall [--remove-user-data] [--yes] | ROOT stop"
+    if len(argv) < 3:
+        print(usage, file=sys.stderr)
+        return 2
+    root = Path(argv[1]).expanduser()
+    command, options = argv[2], set(argv[3:])
+    if command == "stop" and not options:
+        if stop_minecraft(root):
+            print("Stopping Minecraft.")
+        else:
+            print("Minecraft is not running.")
+        return 0
+    if command != "uninstall" or options - {"--remove-user-data", "--yes"}:
+        print(usage, file=sys.stderr)
+        return 2
+    remove_user_data = "--remove-user-data" in options
+    if "--yes" not in options:
+        detail = (
+            "game files, worlds, settings, and the Microsoft/Xbox session"
+            if remove_user_data
+            else "game files (worlds, settings, and account data are kept)"
+        )
+        if not sys.stdin.isatty():
+            print(f"This removes {detail}; pass --yes to confirm.", file=sys.stderr)
+            return 2
+        if input(f"Uninstall Minecraft? This removes {detail}. [y/N] ").strip().lower() != "y":
+            print("Cancelled.")
+            return 1
+    try:
+        with runtime_lock(root):
+            remove_minecraft(root, remove_user_data)
+    except RuntimeError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    print("Minecraft uninstalled." + (" User data removed." if remove_user_data else ""))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

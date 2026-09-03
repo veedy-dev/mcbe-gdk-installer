@@ -50,6 +50,18 @@ class CliTest(unittest.TestCase):
             self.assertIn("update", help_result.stdout)
             self.assertIn("engine [ENGINE]", help_result.stdout)
             self.assertIn("setup-env", help_result.stdout)
+            self.assertIn("uninstall [--remove-user-data] [--yes]", help_result.stdout)
+            self.assertIn("stop ", help_result.stdout)
+
+            (root / "lib/removal.py").write_text(
+                "import sys\nprint('|'.join(sys.argv[1:]))\n",
+                encoding="utf-8",
+            )
+            for args in (["stop"], ["uninstall", "--yes"]):
+                result = subprocess.run(
+                    [command, *args], env=env, capture_output=True, text=True
+                )
+                self.assertEqual(result.stdout.strip(), "|".join([str(root), *args]))
 
             (root / "lib/updates.py").write_text(
                 "import sys\nprint('|'.join(sys.argv[1:]))\n",

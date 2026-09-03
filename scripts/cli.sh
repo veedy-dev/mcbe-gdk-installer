@@ -13,12 +13,15 @@ Usage: mcbe-gdk-linux [COMMAND] [ARGS]
 Commands:
   gui                 Open the installer
   launch [ARGS]       Launch Minecraft (default)
+  stop                Stop the running Minecraft session
+  install [--no-gui] PACKAGE  Install or update Minecraft from an authorized package
+  uninstall [--remove-user-data] [--yes]
+                      Remove Minecraft; optionally worlds, settings, and account
+  update              Install selected installer and engine updates
+  engine [ENGINE]     Show or switch engine (version, latest, or GitHub asset URL)
   login               Connect a Microsoft/Xbox account
   logout              Disconnect the saved account
   status              Show account status
-  update              Install selected installer and engine updates
-  install [--no-gui] PACKAGE  Install or update Minecraft from an authorized package
-  engine [ENGINE]     Show or switch engine (version, latest, or GitHub asset URL)
   recover             Acknowledge GPU recovery after troubleshooting
   setup-env [--fish]  Print the COM_MOJANG environment command
   help                Show this help
@@ -64,6 +67,9 @@ case "$command" in
       exit 1
     }
     exec "$tool_root/easy-install.sh" "$@"
+    ;;
+  stop|uninstall)
+    exec python3 "$ROOT/lib/removal.py" "$ROOT" "$command" "$@"
     ;;
   engine)
     mkdir -p "$BOL_HOME"

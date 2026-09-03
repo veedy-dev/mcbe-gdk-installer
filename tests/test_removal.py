@@ -80,6 +80,35 @@ class RemovalTest(unittest.TestCase):
         self.assertTrue((self.root / "lib").is_dir())
         self.assertTrue((self.root / "application").is_file())
 
+    def test_cli_uninstall_requires_confirmation_and_honors_flags(self):
+        self.seed_profile()
+        script = Path(__file__).resolve().parents[1] / "scripts/removal.py"
+
+        def run(*args):
+            return subprocess.run(
+                ["python3", script, self.root, *args],
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertEqual(run("uninstall").returncode, 2)
+        self.assertTrue((self.root / "game").exists())
+        self.assertEqual(run("uninstall", "--bogus", "--yes").returncode, 2)
+
+        result = run("uninstall", "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.root / "game").exists())
+        self.assertTrue((self.profile / "worlds/world/level.dat").is_file())
+
+        result = run("uninstall", "--remove-user-data", "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.profile / "worlds").exists())
+
+        result = run("stop")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("not running", result.stdout)
+
     def test_runtime_lock_rejects_concurrent_uninstall(self):
         lock_path = self.profile / LOCK_NAME
         lock_path.parent.mkdir(parents=True)

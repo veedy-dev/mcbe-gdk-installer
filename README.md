@@ -157,13 +157,15 @@ engine profiles apply.
 | `mcbe-gdk-linux` or `mcbe-gdk-linux launch` | Launch Minecraft |
 | `mcbe-gdk-linux gui` | Open the setup UI |
 | `mcbe-gdk-linux install [--no-gui] PACKAGE` | Install or update the game from a package |
+| `mcbe-gdk-linux uninstall [--remove-user-data]` | Remove the game; optionally worlds, settings, and account |
+| `mcbe-gdk-linux stop` | Stop the running Minecraft session |
 | `mcbe-gdk-linux update` | Install available installer and engine updates |
 | `mcbe-gdk-linux engine [VERSION\|latest\|URL]` | Show or switch the compatibility engine |
 | `mcbe-gdk-linux login` / `logout` / `status` | Launcher account commands for older engines |
 | `mcbe-gdk-linux recover` | Allow launching again after an interrupted GPU session (see [Troubleshooting](docs/TROUBLESHOOTING.md)) |
 | `mcbe-gdk-linux setup-env` | Print the `COM_MOJANG` environment command |
 | `mcbe-gdk-linux help` | Show all commands |
-| `./uninstall.sh` | Remove launchers and shortcuts |
+| `./uninstall.sh` | Remove the launcher commands and shortcuts (keeps game and profile) |
 
 ## Documentation
 
