@@ -14,9 +14,9 @@
 
 ## About
 
-MCBE GDK Installer sets up the Windows GDK build of Minecraft Bedrock on Linux
-and runs it through Wine with working Xbox sign-in. You bring an authorized
-game package. It takes care of the rest.
+MCBE GDK Installer installs the Windows GDK build of Minecraft Bedrock from
+an authorized package and runs it on Linux through a WineGDK-based
+compatibility engine, with Xbox Live authentication.
 
 - Installs from `.zip`, `.msixvc`, or `.msixv` packages
 - Decrypts `/LT` test-crypted packages locally
