@@ -132,9 +132,9 @@ the terminal.
 
 ## Compatibility engine
 
-The compatibility engine is a source-built WineGDK runtime published as
-verified releases at
-[mcbe-gdk-engine](https://github.com/veedy-dev/mcbe-gdk-engine). The newest
+The compatibility engine is the Wine-based runtime that runs Minecraft. It is
+built and released at
+[mcbe-gdk-engine](https://github.com/veedy-dev/mcbe-gdk-engine); the newest
 release is used by default and installed automatically.
 
 To stay on a specific release or switch between them without reinstalling the
