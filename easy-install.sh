@@ -37,7 +37,7 @@ download() {
   mv "$output.part" "$output"
 }
 
-INSTALLER_SHORTCUT="--gui"
+INSTALLER_SHORTCUT=""
 case "${1:-}" in
   --no-gui) INSTALLER_SHORTCUT="--no-gui"; shift ;;
   -h|--help) usage; exit 0 ;;
@@ -53,15 +53,20 @@ for command in curl tar unzip grep sed find python3 sha256sum 7z; do
   command -v "$command" >/dev/null || { echo "$command is required." >&2; exit 1; }
 done
 
-if [[ "$INSTALLER_SHORTCUT" == "--gui" && -t 0 ]]; then
-  printf 'Add the installer GUI to the application menu? [Y/n] '
-  read -r answer || answer=""
-  case "${answer,,}" in
-    n|no) INSTALLER_SHORTCUT="--no-gui" ;;
-  esac
+ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/mcbe-gdk-linux"
+# Ask about the GUI shortcut once; later installs keep the earlier choice.
+if [[ -z "$INSTALLER_SHORTCUT" && ! -e "$ROOT/.no-gui-shortcut" && ! -e \
+      "${XDG_DATA_HOME:-$HOME/.local/share}/applications/io.github.veedydev.MCBEGDKInstaller.desktop" ]]; then
+  INSTALLER_SHORTCUT="--gui"
+  if [[ -t 0 ]]; then
+    printf 'Add the installer GUI to the application menu? [Y/n] '
+    read -r answer || answer=""
+    case "${answer,,}" in
+      n|no) INSTALLER_SHORTCUT="--no-gui" ;;
+    esac
+  fi
 fi
 
-ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/mcbe-gdk-linux"
 MCBE_GDK_ROOT="$ROOT" BOL_HOME="$ROOT/profile" \
 PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}" \
   python3 "$SCRIPT_DIR/scripts/runtime.py" ensure-deps || {
@@ -203,7 +208,7 @@ if [[ -e "$GAME_DIR" ]]; then
 fi
 mv "$NEW_GAME" "$GAME_DIR"
 "${MCBE_GDK_INSTALLER:-$SCRIPT_DIR/install.sh}" \
-  "$GAME_DIR" --version "$VERSION" "$INSTALLER_SHORTCUT"
+  "$GAME_DIR" --version "$VERSION" ${INSTALLER_SHORTCUT:+"$INSTALLER_SHORTCUT"}
 if [[ -n "$GAME_BACKUP" ]]; then
   rm -rf "$GAME_BACKUP"
   GAME_BACKUP=""

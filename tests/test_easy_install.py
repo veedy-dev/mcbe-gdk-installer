@@ -167,6 +167,27 @@ esac
                 ["local", "--no-gui"],
             )
 
+            # A later install keeps the earlier shortcut choice without asking.
+            (root / ".local/share/mcbe-gdk-linux/.no-gui-shortcut").touch()
+            master, slave = pty.openpty()
+            try:
+                repeated = subprocess.run(
+                    [repo / "easy-install.sh", package],
+                    cwd=repo,
+                    env=env,
+                    stdin=slave,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+            finally:
+                os.close(master)
+                os.close(slave)
+            self.assertNotIn("Add the installer GUI", repeated.stdout)
+            self.assertEqual(
+                (root / "install-args").read_text().splitlines(), ["local"]
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

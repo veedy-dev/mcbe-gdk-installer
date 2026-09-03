@@ -100,14 +100,14 @@ class CliTest(unittest.TestCase):
             fake_installer.chmod(0o755)
             (root / "source-dir").write_text(f"{fake_tool}\n")
             install_result = subprocess.run(
-                [command, "install", "--no-gui", "/tmp/build.zip"],
+                [command, "install", "/tmp/build.zip"],
                 env=env,
                 capture_output=True,
                 text=True,
                 check=False,
             )
             self.assertEqual(install_result.returncode, 0, install_result.stderr)
-            self.assertEqual(install_result.stdout.strip(), "install|--no-gui|/tmp/build.zip")
+            self.assertEqual(install_result.stdout.strip(), "install|/tmp/build.zip")
             (root / "source-dir").write_text(f"{repo}\n")
 
             installer_entry = (

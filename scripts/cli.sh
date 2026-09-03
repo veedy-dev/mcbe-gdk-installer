@@ -14,7 +14,7 @@ Commands:
   gui                 Open the installer
   launch [ARGS]       Launch Minecraft (default)
   stop                Stop the running Minecraft session
-  install [--no-gui] PACKAGE  Install or update Minecraft from an authorized package
+  install PACKAGE     Install or update Minecraft from an authorized package
   uninstall [--remove-user-data] [--yes]
                       Remove Minecraft; optionally worlds, settings, and account
   update              Install selected installer and engine updates

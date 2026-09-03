@@ -4,9 +4,10 @@
 
 # MCBE GDK Installer
 
-Install and run Minecraft Bedrock GDK builds on Linux, with working Xbox
-sign-in. Bring your own authorized package; the installer handles decryption,
-the compatibility engine, the isolated profile, and updates.
+Run Minecraft Bedrock GDK builds on Linux with working Xbox sign-in. You
+supply an authorized game package. The installer decrypts it, installs the
+compatibility engine, keeps a separate profile for worlds and settings, and
+updates itself.
 
 > [!IMPORTANT]
 > This project does not include Minecraft files, credentials, licenses,
@@ -14,73 +15,50 @@ the compatibility engine, the isolated profile, and updates.
 > build and Microsoft GDK. Only `/LT` test-crypted development packages are
 > supported; retail and account-licensed packages are not.
 
-## Quick start
+## Step 1: install the installer
 
-1. Install the launcher (one line, no clone needed). It installs the
-   distribution packages it needs and asks whether you want the desktop UI:
+One command. It installs the packages your distribution needs (Arch, Fedora,
+Ubuntu, Debian) and puts the `mcbe-gdk-linux` command in `~/.local/bin`.
 
-   ```bash
-   curl -fsSL https://raw.githubusercontent.com/veedy-dev/mcbe-gdk-installer/main/bootstrap.sh | bash
-   ```
+With the desktop app:
 
-2. Install your game package:
+```bash
+curl -fsSL https://raw.githubusercontent.com/veedy-dev/mcbe-gdk-installer/main/bootstrap.sh | bash -s -- --gui
+```
 
-   - **Desktop UI**: open **MCBE GDK Installer** (or run `mcbe-gdk-linux gui`),
-     click **Select…**, pick the `.zip`, `.msixvc`, or `.msixv`, then
-     **Install**.
-   - **Terminal**:
+Command line only, no GTK:
 
-     ```bash
-     mcbe-gdk-linux install "/path/to/Minecraft-package.zip"
-     ```
+```bash
+curl -fsSL https://raw.githubusercontent.com/veedy-dev/mcbe-gdk-installer/main/bootstrap.sh | bash -s -- --cli
+```
 
-3. Launch Minecraft from the app menu or with `mcbe-gdk-linux`, then choose
-   **Sign In** inside the game. A Microsoft device-code prompt opens; complete
-   it in your browser and you are signed in.
-
-The first install downloads the compatibility engine and, once, the official
-Microsoft GDK archive for the public test key. Everything lives under
-`~/.local/share/mcbe-gdk-linux`, separate from any other Minecraft install.
-
-## Updating
-
-- **New game build**: repeat step 2 with the new package. Only the game files
-  are replaced; your account, worlds, and settings stay.
-- **Installer or engine**: the UI shows an update row when a release is
-  available, or run `mcbe-gdk-linux update`. Profile data is preserved.
-
-## Supported platforms
-
-- x86_64 Linux with a Vulkan-capable GPU
-- Python 3
-- `curl`, `tar`, `sha256sum`, `flock`; `unzip` and `7z` for package installs
-- Desktop UI only: GTK4, Libadwaita, PyGObject; `qrencode` optional
-
-`bootstrap.sh` installs these on Arch, Fedora, and Ubuntu/Debian. To install
-them yourself:
+Run it without `--gui` or `--cli` and it asks which one you want. You can
+change your mind later by running it again.
 
 <details>
-<summary>Arch Linux</summary>
+<summary>Install the packages yourself instead</summary>
+
+Everything needs x86_64 Linux, a Vulkan-capable GPU, Python 3, `curl`, `tar`,
+`sha256sum`, and `flock`. Package installs also need `unzip` and `7z`. The
+desktop app needs GTK4, Libadwaita, and PyGObject; `qrencode` is optional.
+
+Arch Linux:
 
 ```bash
 sudo pacman -S --needed \
   gtk4 libadwaita python python-gobject python-cryptography \
   qrencode curl tar unzip 7zip
 ```
-</details>
 
-<details>
-<summary>Fedora</summary>
+Fedora:
 
 ```bash
 sudo dnf install \
   gtk4 libadwaita python3 python3-gobject python3-cryptography \
   qrencode curl tar unzip p7zip p7zip-plugins
 ```
-</details>
 
-<details>
-<summary>Ubuntu / Debian</summary>
+Ubuntu / Debian:
 
 ```bash
 sudo apt update
@@ -90,82 +68,132 @@ sudo apt install \
 ```
 </details>
 
-## Install options
-
-### Unattended bootstrap
-
-Pick the mode up front instead of answering the prompt:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/veedy-dev/mcbe-gdk-installer/main/bootstrap.sh | bash -s -- --cli
-```
-
-`--cli` skips the GTK stack, `unzip`, and `7z` and adds no UI shortcut;
-`--gui` installs the desktop application and opens it.
-
-### From a source checkout
+<details>
+<summary>Run from a git checkout instead</summary>
 
 ```bash
 git clone https://github.com/veedy-dev/mcbe-gdk-installer.git
 cd mcbe-gdk-installer
-./gui.sh                                   # desktop UI
-./easy-install.sh "/path/to/package.zip"   # or terminal install
+./gui.sh                                            # desktop app
+./easy-install.sh [--no-gui] "/path/to/package.zip" # terminal install
 ```
 
-Terminal installs ask whether to add the UI to the application menu; pass
-`--no-gui` before the package path to skip that. Rerun the same command after
-`git pull` to update.
+`easy-install.sh` installs the game and the `mcbe-gdk-linux` command. The
+first run asks whether to add the desktop app to your application menu;
+`--no-gui` skips the question and the shortcut. Later runs keep whatever you
+chose. After `git pull`, run the same command again to update.
 
 Already have decrypted game files? See
 [Use existing game files](docs/EXISTING_FILES.md).
+</details>
 
-## Accounts and sign-in
+## Step 2: install the game
 
-Sign-in happens inside Minecraft: choose **Sign In**, and the launcher
-presents the Microsoft URL and code the game requested. Sign out from the
-game's Profile screen. The Xbox session is stored in the isolated profile and
-survives game, engine, and installer updates.
+Desktop app: open MCBE GDK Installer from your application menu (or run
+`mcbe-gdk-linux gui`), click Select, pick your `.zip`, `.msixvc`, or `.msixv`,
+then click Install.
 
-Older engine releases sign in from the installer instead: use the **Sign in**
-button in the UI or `mcbe-gdk-linux login`, which prints the device code in
-the terminal.
+Terminal:
+
+```bash
+mcbe-gdk-linux install "/path/to/Minecraft-package.zip"
+```
+
+The first install downloads the compatibility engine and, once, the official
+Microsoft GDK archive to extract the public test key. Everything is stored in
+`~/.local/share/mcbe-gdk-linux`, apart from any other Minecraft install.
+
+## Step 3: play
+
+Start Minecraft from the application menu or run `mcbe-gdk-linux`. Choose
+Sign In inside the game. A Microsoft device-code prompt opens; finish it in
+your browser. The session is saved in the profile and survives game, engine,
+and installer updates. Sign out from the game's Profile screen.
+
+Older engine releases sign in from the installer instead, with the Sign in
+button in the app or `mcbe-gdk-linux login`.
+
+## Updating
+
+New game build? Do step 2 again with the new package. Only the game files
+change; worlds, settings, and your account stay.
+
+Installer and engine updates show up as an update row in the app. In the
+terminal, run `mcbe-gdk-linux update`.
 
 ## Compatibility engine
 
-The compatibility engine is the Wine-based runtime that runs Minecraft. It is
-built and released at
-[mcbe-gdk-engine](https://github.com/veedy-dev/mcbe-gdk-engine); the newest
-release is used by default and installed automatically.
+The engine is the Wine-based runtime that runs Minecraft. It is built and
+released at [mcbe-gdk-engine](https://github.com/veedy-dev/mcbe-gdk-engine).
+The newest release is used by default. To stay on a specific release, or to
+try another one without reinstalling the game, use the Compatibility engine
+selector in the app or `mcbe-gdk-linux engine`. The selection is kept across
+updates. `docs/ENGINE.md` covers custom engine archives.
 
-To stay on a specific release or switch between them without reinstalling the
-game, use the **Compatibility engine** selector in the UI or:
+## Commands
 
-```bash
-mcbe-gdk-linux engine            # show installed and selected engine
-mcbe-gdk-linux engine VERSION    # use a specific release
-mcbe-gdk-linux engine latest     # follow new releases again
-```
+`mcbe-gdk-linux` with no arguments launches Minecraft. Every action in the
+desktop app has a terminal equivalent.
 
-`engine` also accepts a GitHub release asset URL for a custom `.tar.gz`
-engine; see [docs/ENGINE.md](docs/ENGINE.md) for what is verified and how
-engine profiles apply.
+### Game
 
-## Command reference
+`mcbe-gdk-linux launch`
+Start Minecraft. Refuses to start a second copy while one is running.
 
-| Command | Purpose |
-| --- | --- |
-| `mcbe-gdk-linux` or `mcbe-gdk-linux launch` | Launch Minecraft |
-| `mcbe-gdk-linux gui` | Open the setup UI |
-| `mcbe-gdk-linux install [--no-gui] PACKAGE` | Install or update the game from a package |
-| `mcbe-gdk-linux uninstall [--remove-user-data]` | Remove the game; optionally worlds, settings, and account |
-| `mcbe-gdk-linux stop` | Stop the running Minecraft session |
-| `mcbe-gdk-linux update` | Install available installer and engine updates |
-| `mcbe-gdk-linux engine [VERSION\|latest\|URL]` | Show or switch the compatibility engine |
-| `mcbe-gdk-linux login` / `logout` / `status` | Launcher account commands for older engines |
-| `mcbe-gdk-linux recover` | Allow launching again after an interrupted GPU session (see [Troubleshooting](docs/TROUBLESHOOTING.md)) |
-| `mcbe-gdk-linux setup-env` | Print the `COM_MOJANG` environment command |
-| `mcbe-gdk-linux help` | Show all commands |
-| `./uninstall.sh` | Remove the launcher commands and shortcuts (keeps game and profile) |
+`mcbe-gdk-linux stop`
+Stop the running Minecraft session.
+
+`mcbe-gdk-linux install PACKAGE`
+Install the game from a `.zip`, `.msixvc`, or `.msixv` package, or replace
+the installed game with a newer build. Worlds, settings, and the account are
+kept.
+
+`mcbe-gdk-linux uninstall`
+Remove the game files. Worlds, settings, and the account are kept, so a later
+`install` picks them up again. Add `--remove-user-data` to delete those too.
+The command asks for confirmation; add `--yes` to skip the question in
+scripts.
+
+### Updates and engine
+
+`mcbe-gdk-linux update`
+Check GitHub for a newer installer and engine release and install what is
+available.
+
+`mcbe-gdk-linux engine`
+Show the installed engine and which release is selected.
+
+`mcbe-gdk-linux engine VERSION`
+Install a specific engine release and stay on it. `mcbe-gdk-linux engine
+latest` goes back to following new releases. A GitHub release asset URL
+installs a custom engine archive.
+
+### Account
+
+`mcbe-gdk-linux login`, `logout`, `status`
+Launcher-side sign-in for older engine releases. Current releases sign in
+inside Minecraft, and these commands tell you so.
+
+### Other
+
+`mcbe-gdk-linux gui`
+Open the desktop app.
+
+`mcbe-gdk-linux recover`
+Allow launching again after a crash or power loss interrupted a game session.
+The launcher blocks new launches until you confirm the graphics driver is
+healthy; see [Troubleshooting](docs/TROUBLESHOOTING.md).
+
+`mcbe-gdk-linux setup-env`
+Print the `COM_MOJANG` environment line for tools like Regolith. Add
+`--fish` for fish shell syntax.
+
+`mcbe-gdk-linux help`
+List these commands.
+
+`./uninstall.sh`
+From a git checkout: remove the `mcbe-gdk-linux` command and the application
+menu entries. The game and profile stay on disk.
 
 ## Documentation
 
