@@ -17,6 +17,7 @@ Commands:
   logout              Disconnect the saved account
   status              Show account status
   update              Install selected installer and engine updates
+  install PACKAGE     Install or update Minecraft from an authorized package
   engine [ENGINE]     Show or switch engine (version, latest, or GitHub asset URL)
   recover             Acknowledge GPU recovery after troubleshooting
   setup-env [--fish]  Print the COM_MOJANG environment command
@@ -49,6 +50,21 @@ case "$command" in
       exit 1
     }
     exec python3 "$ROOT/lib/updates.py" install "$tool_root" "$ROOT"
+    ;;
+  install)
+    [[ $# -eq 1 ]] || { echo "Usage: mcbe-gdk-linux install PACKAGE" >&2; exit 2; }
+    mkdir -p "$BOL_HOME"
+    exec 9>"$BOL_HOME/.desktop-launch.lock"
+    flock -n 9 || {
+      echo "Minecraft or another MCBE GDK command is running; try again after it closes." >&2
+      exit 1
+    }
+    tool_root="$(cat "$ROOT/source-dir" 2>/dev/null || true)"
+    [[ -n "$tool_root" && -f "$tool_root/easy-install.sh" ]] || {
+      echo "MCBE GDK Installer source is missing; reinstall the installer." >&2
+      exit 1
+    }
+    exec "$tool_root/easy-install.sh" "$1"
     ;;
   engine)
     mkdir -p "$BOL_HOME"

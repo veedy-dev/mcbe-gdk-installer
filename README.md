@@ -144,6 +144,12 @@ Give the installer your `.zip`, `.msixvc`, or `.msixv` package:
 ./easy-install.sh "/path/to/Minecraft-package.msixvc"
 ```
 
+After the first install, update to a newer package without a source checkout:
+
+```bash
+mcbe-gdk-linux install "/path/to/Minecraft-package.zip"
+```
+
 Terminal installs ask whether to add the installer GUI to the application
 menu. Pass `--no-gui` before the package path to skip both the prompt and that
 shortcut; the Minecraft shortcut and `mcbe-gdk-linux` command are still added.
@@ -200,6 +206,7 @@ installs, set `MCBE_GDK_ENGINE_RELEASE` to the complete asset URL above.
 | Show command help | `mcbe-gdk-linux help` |
 | Open setup UI | `./gui.sh` or `mcbe-gdk-linux gui` |
 | Package-to-Linux setup | `./easy-install.sh /path/to/mcbe-gdk-build.msixvc` |
+| Install or update from a package | `mcbe-gdk-linux install /path/to/mcbe-gdk-build.zip` |
 | Launch Minecraft | `mcbe-gdk-linux launch` or `mcbe-gdk-linux` |
 | Stable-engine account status | `mcbe-gdk-linux status` |
 | Stable-engine sign in | `mcbe-gdk-linux login` |
