@@ -32,9 +32,6 @@ CONTENT="$(realpath "$CONTENT")"
 [[ -f "$CONTENT/Minecraft.Windows.exe" ]] || {
   echo "Error: $CONTENT/Minecraft.Windows.exe was not found." >&2; exit 1;
 }
-command -v curl >/dev/null || { echo "curl is required." >&2; exit 1; }
-command -v tar >/dev/null || { echo "tar is required." >&2; exit 1; }
-command -v sha256sum >/dev/null || { echo "sha256sum is required." >&2; exit 1; }
 command -v python3 >/dev/null || { echo "python3 is required." >&2; exit 1; }
 
 if [[ -n "${MCBE_GDK_ENGINE_RELEASE:-}" ]]; then
@@ -44,22 +41,9 @@ elif [[ -f "$ROOT/engine-release" ]]; then
 else
   ENGINE_SELECTION="latest"
 fi
-if [[ "$ENGINE_SELECTION" == "latest" ]]; then
-  ENGINE_RELEASE="$(
-    python3 "$SCRIPT_DIR/scripts/updates.py" latest-tag "$ENGINE_REPO"
-  )"
-else
-  ENGINE_RELEASE="$ENGINE_SELECTION"
-fi
-[[ "$ENGINE_RELEASE" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
-  echo "The engine release version is invalid: $ENGINE_RELEASE" >&2
-  exit 1
-}
-ENGINE_ASSET="GDK-Proton-mcbe-gdk-${ENGINE_RELEASE}.tar.gz"
 
 mkdir -p \
   "$ROOT/engine" "$ROOT/profile" "$ROOT/lib" "$ROOT/licenses"
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
 MCBE_GDK_ROOT="$ROOT" BOL_HOME="$ROOT/profile" \
 PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}" \
@@ -82,16 +66,8 @@ if [[ ! -f "$CONTENT/Microsoft.WindowsAppRuntime.Bootstrap.dll" &&
      "$CONTENT/Microsoft.WindowsAppRuntime.Bootstrap.dll"
 fi
 
-echo "Downloading the MCBE GDK compatibility engine..."
-RELEASE_URL="https://github.com/$ENGINE_REPO/releases/download/$ENGINE_RELEASE"
-curl -fL --retry 3 "$RELEASE_URL/$ENGINE_ASSET" -o "$TMP/$ENGINE_ASSET"
-echo "Verifying the MCBE GDK compatibility engine..."
-curl -fL --retry 3 "$RELEASE_URL/$ENGINE_ASSET.sha256" -o "$TMP/$ENGINE_ASSET.sha256"
-(cd "$TMP" && sha256sum -c "$ENGINE_ASSET.sha256")
 echo "Installing the MCBE GDK compatibility engine..."
-rm -rf "$ROOT/engine/GDK-Proton-mcbe-gdk"
-tar -xzf "$TMP/$ENGINE_ASSET" -C "$ROOT/engine"
-printf '%s\n' "$ENGINE_SELECTION" >"$ROOT/engine-release"
+python3 "$SCRIPT_DIR/scripts/updates.py" engine "$ROOT" "$ENGINE_SELECTION"
 
 launcher_args=("$ROOT" "$SCRIPT_DIR")
 [[ -z "$SHORTCUT_POLICY" ]] || launcher_args+=("$SHORTCUT_POLICY")

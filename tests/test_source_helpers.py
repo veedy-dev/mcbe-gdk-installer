@@ -15,7 +15,7 @@ class SourceHelperImportTest(unittest.TestCase):
     def test_install_exports_source_root_before_updates_helper(self):
         install = (self.repo / "install.sh").read_text(encoding="utf-8")
         export = 'export PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}"'
-        invocation = 'python3 "$SCRIPT_DIR/scripts/updates.py" latest-tag'
+        invocation = 'python3 "$SCRIPT_DIR/scripts/updates.py" engine'
         self.assertIn(export, install)
         self.assertIn(invocation, install)
         self.assertLess(install.index(export), install.index(invocation))
