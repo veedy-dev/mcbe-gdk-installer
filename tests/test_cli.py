@@ -84,7 +84,7 @@ class CliTest(unittest.TestCase):
             fake_tool = Path(temporary) / "tool"
             fake_tool.mkdir()
             fake_installer = fake_tool / "easy-install.sh"
-            fake_installer.write_text('#!/bin/sh\nprintf "install|%s\\n" "$@"\n')
+            fake_installer.write_text('#!/bin/sh\nIFS="|"; printf "install|%s\\n" "$*"\n')
             fake_installer.chmod(0o755)
             (root / "source-dir").write_text(f"{fake_tool}\n")
             install_result = subprocess.run(
