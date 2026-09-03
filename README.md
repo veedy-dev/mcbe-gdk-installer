@@ -132,17 +132,18 @@ the terminal.
 
 ## Compatibility engine
 
-The engine is a pinned, source-built WineGDK runtime published as verified
-releases at [mcbe-gdk-engine](https://github.com/veedy-dev/mcbe-gdk-engine).
-The newest release is used by default and installed automatically.
+The compatibility engine is a source-built WineGDK runtime published as
+verified releases at
+[mcbe-gdk-engine](https://github.com/veedy-dev/mcbe-gdk-engine). The newest
+release is used by default and installed automatically.
 
-To pin or switch releases without reinstalling the game, use the
-**Compatibility engine** selector in the UI or:
+To stay on a specific release or switch between them without reinstalling the
+game, use the **Compatibility engine** selector in the UI or:
 
 ```bash
 mcbe-gdk-linux engine            # show installed and selected engine
-mcbe-gdk-linux engine VERSION    # pin a release
-mcbe-gdk-linux engine latest     # track new releases again
+mcbe-gdk-linux engine VERSION    # use a specific release
+mcbe-gdk-linux engine latest     # follow new releases again
 ```
 
 `engine` also accepts a GitHub release asset URL for a custom `.tar.gz`
@@ -159,7 +160,6 @@ engine profiles apply.
 | `mcbe-gdk-linux update` | Install available installer and engine updates |
 | `mcbe-gdk-linux engine [VERSION\|latest\|URL]` | Show or switch the compatibility engine |
 | `mcbe-gdk-linux login` / `logout` / `status` | Launcher account commands for older engines |
-| `mcbe-gdk-linux recover` | Clear the GPU-recovery marker after troubleshooting |
 | `mcbe-gdk-linux setup-env` | Print the `COM_MOJANG` environment command |
 | `mcbe-gdk-linux help` | Show all commands |
 | `./uninstall.sh` | Remove launchers and shortcuts |
