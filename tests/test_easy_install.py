@@ -62,8 +62,8 @@ class NativePackageInstallTest(unittest.TestCase):
             self.assertEqual(selection_file.read_text().strip(), "v0.1.2")
 
             url = (
-                "https://github.com/veedy-dev/mcbe-gdk-engine/releases/download/"
-                "v0.2.0-experimental/GDK-Proton-mcbe-gdk-v0.2.0-experimental.tar.gz"
+                "https://github.com/owner/custom-engine/releases/download/"
+                "build-4/custom-engine.tar.gz"
             )
             selection_file.write_text(url + "\n")
             subprocess.run(

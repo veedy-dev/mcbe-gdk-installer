@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +18,9 @@ LUKAS_EXPERIMENTAL_ASSET = "GDK-Proton10-32-Custom-4.tar.gz"
 LUKAS_EXPERIMENTAL_SHA256 = (
     "4d19774c64451d4f1395dc4c5f4b6e8b5fdbc1ce6c05e29a855f5e0678b8800c"
 )
+ENGINE_REPOSITORY = "veedy-dev/mcbe-gdk-engine"
+STABLE_ENGINE_PROFILE_ID = "mcbe-gdk-engine-v0.2-v1"
+STABLE_ENGINE_MIN_VERSION = (0, 2, 0)
 EXPERIMENTAL_ENGINE_PROFILE_ID = "mcbe-v0.2.0-experimental-v1"
 EXPERIMENTAL_ENGINE_TAG = "v0.2.0-experimental"
 EXPERIMENTAL_ENGINE_ASSET = (
@@ -86,8 +90,8 @@ LUKAS_EXPERIMENTAL_PROFILE = EngineProfile(
     ignore_gaming_services_version=True,
 )
 
-# Source-built experimental profile with the Gaming Services gate fixed in the
-# maintained engine source and verified by the pinned release build.
+# Legacy prerelease mirror of the v0.2.0 engine. Retained so an existing
+# installation restores its profile until the selection migrates to latest.
 EXPERIMENTAL_ENGINE_PROFILE = EngineProfile(
     identifier=EXPERIMENTAL_ENGINE_PROFILE_ID,
     repository="veedy-dev/mcbe-gdk-engine",
@@ -103,12 +107,36 @@ EXPERIMENTAL_ENGINE_PROFILE = EngineProfile(
     ignore_gaming_services_version=True,
 )
 
+# Maintained engine releases from v0.2.0 on: the Gaming Services gate is fixed
+# in source and Microsoft sign-in happens inside Minecraft.
+STABLE_ENGINE_PROFILE = EngineProfile(
+    identifier=STABLE_ENGINE_PROFILE_ID,
+    repository=ENGINE_REPOSITORY,
+    authentication="remote-connect-json",
+    msa_app_id="0000000048183522",
+    title_id="67b57dac",
+    disable_app_runtime_bootstrap=True,
+    login_request_parent_levels=1,
+    patch_gaming_services_gate=False,
+    ignore_gaming_services_version=True,
+)
+
 _PROFILES = (
     LUKAS_ENGINE_PROFILE,
     LUKAS_EXPERIMENTAL_PROFILE,
     EXPERIMENTAL_ENGINE_PROFILE,
 )
-_PROFILES_BY_ID = {profile.identifier: profile for profile in _PROFILES}
+_PROFILES_BY_ID = {
+    profile.identifier: profile for profile in (*_PROFILES, STABLE_ENGINE_PROFILE)
+}
+
+
+def profile_for_release(tag: str) -> EngineProfile | None:
+    """Profile for a maintained engine release tag such as ``v0.2.0``."""
+    match = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", tag)
+    if match and tuple(map(int, match.groups())) >= STABLE_ENGINE_MIN_VERSION:
+        return STABLE_ENGINE_PROFILE
+    return None
 
 
 def profile_for_asset(
@@ -124,6 +152,8 @@ def profile_for_asset(
         if profile.sha256 is not None and profile.sha256 != sha256:
             continue
         return profile
+    if repository.casefold() == ENGINE_REPOSITORY.casefold():
+        return profile_for_release(tag)
     return None
 
 

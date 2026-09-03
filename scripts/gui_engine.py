@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GTK integration for the reviewed experimental compatibility engine."""
+"""GTK integration for profiled compatibility engines."""
 
 from __future__ import annotations
 
@@ -15,16 +15,9 @@ from updates import (  # noqa: E402
     install_custom_engine,
 )
 
-EXPERIMENTAL_ENGINE_LABEL = "MCBE GDK v0.2.0-experimental"
-EXPERIMENTAL_ENGINE_URL = (
-    "https://github.com/veedy-dev/mcbe-gdk-engine/releases/download/"
-    "v0.2.0-experimental/GDK-Proton-mcbe-gdk-v0.2.0-experimental.tar.gz"
-)
-EXPERIMENTAL_ENGINE_IDENTITY = "veedy-dev/mcbe-gdk-engine@v0.2.0-experimental"
-
 
 class Window(base.Window):
-    """Add the reviewed experiment without weakening the stable release UI."""
+    """Account and custom-engine handling for profiled engines."""
 
     def refresh_engine_row(self) -> None:
         installed = base.read_engine_version(base.ROOT) or "not installed"
@@ -33,8 +26,6 @@ class Window(base.Window):
             subtitle = f"{installed} installed · selection unavailable"
         elif selection == "latest":
             subtitle = f"{installed} installed · tracking latest"
-        elif selection == EXPERIMENTAL_ENGINE_URL:
-            subtitle = f"{installed} installed · v0.2.0-experimental selected"
         elif selection.startswith("https://"):
             subtitle = f"{installed} installed · custom GitHub release selected"
         else:
@@ -44,11 +35,8 @@ class Window(base.Window):
         self.engine_row.set_subtitle(subtitle)
 
     def populate_engine_combo(self, selected: str) -> None:
-        entries = ["Latest", EXPERIMENTAL_ENGINE_LABEL]
-        values = {
-            "Latest": "latest",
-            EXPERIMENTAL_ENGINE_LABEL: EXPERIMENTAL_ENGINE_URL,
-        }
+        entries = ["Latest"]
+        values = {"Latest": "latest"}
         for tag in self.engine_tags[: self.engine_visible_count]:
             entries.append(tag)
             values[tag] = tag
@@ -135,13 +123,11 @@ class Window(base.Window):
             )
             return
         dialog = base.Adw.AlertDialog(
-            heading="Use MCBE GDK v0.2.0-experimental?",
+            heading="Use custom GitHub engine?",
             body=(
-                "This installs the project's source-built, SHA-256-verified "
-                "experimental engine. Microsoft sign-in happens from Minecraft's "
-                "own Sign In button, not from the launcher or CLI. "
-                "Parties and Realms are currently unsupported; worlds and "
-                "installer account data are preserved."
+                "This installs the selected GitHub release asset after "
+                "verifying its SHA-256 digest. Worlds and installer account "
+                "data are preserved."
             ),
         )
         dialog.add_response("cancel", "Cancel")
@@ -167,8 +153,8 @@ class Window(base.Window):
             return
 
         self.begin_update_ui(
-            "Switching to MCBE GDK v0.2.0-experimental…",
-            "Resolving and verifying the experimental release asset.",
+            "Switching to custom GitHub engine…",
+            "Resolving and verifying the release asset.",
         )
 
         def worker() -> None:
@@ -189,7 +175,9 @@ class Window(base.Window):
                     (base.ROOT / ENGINE_SELECTION_FILE).write_text(
                         selected + "\n", encoding="utf-8"
                     )
-                self.events.put(("engine_switch_done", EXPERIMENTAL_ENGINE_IDENTITY))
+                self.events.put(
+                    ("engine_switch_done", f"{asset.repo}@{asset.tag}")
+                )
             except Exception as exc:
                 self.events.put(("engine_switch_error", str(exc)))
 

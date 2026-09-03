@@ -21,8 +21,11 @@ from urllib.request import Request, urlopen
 
 from auth.engine_profiles import (
     CUSTOM_ENGINE_METADATA,
+    EXPERIMENTAL_ENGINE_ASSET,
+    EXPERIMENTAL_ENGINE_TAG,
     EngineProfile,
     profile_for_asset,
+    profile_for_release,
     read_custom_engine_metadata,
 )
 from auth.game_profile import apply_installed_engine_profile
@@ -32,6 +35,12 @@ INSTALLER_REPO = "veedy-dev/mcbe-gdk-installer"
 ENGINE_REPO = "veedy-dev/mcbe-gdk-engine"
 VERSION_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 ENGINE_SELECTION_FILE = "engine-release"
+# The v0.2.0 prerelease shipped as a custom asset URL; it is now the v0.2.0
+# release, so that selection tracks latest.
+LEGACY_EXPERIMENTAL_ENGINE_URL = (
+    f"https://github.com/{ENGINE_REPO}/releases/download/"
+    f"{EXPERIMENTAL_ENGINE_TAG}/{EXPERIMENTAL_ENGINE_ASSET}"
+)
 API_VERSION = "2022-11-28"
 MAX_RELEASE_JSON = 1_000_000
 MAX_RELEASE_LIST_JSON = 10_000_000
@@ -113,6 +122,8 @@ def _parse_custom_engine_url(value: str) -> tuple[str, str, str]:
 
 def normalize_engine_selection(value: str) -> str:
     value = value.strip()
+    if value == LEGACY_EXPERIMENTAL_ENGINE_URL:
+        return "latest"
     if value.startswith("https://"):
         _parse_custom_engine_url(value)
         return value
@@ -303,6 +314,8 @@ def _installed_engine_hashes(engine: Path) -> dict[str, str]:
 def read_engine_version(root: Path) -> str | None:
     custom = read_custom_engine_metadata(root)
     if custom:
+        if custom["repository"] == ENGINE_REPO and VERSION_RE.fullmatch(custom["tag"]):
+            return custom["tag"]
         return f"{custom['repository']}@{custom['tag']}"
     manifest = root / "engine/GDK-Proton-mcbe-gdk/engine-manifest.json"
     if not manifest.is_file():
@@ -403,7 +416,7 @@ def _asset(release: Release, name: str) -> str:
         raise UpdateError(f"{release.tag} is missing {name}.") from exc
 
 
-def _verify_checksum(archive: Path, checksum: Path) -> None:
+def _verify_checksum(archive: Path, checksum: Path) -> str:
     try:
         line = checksum.read_text(encoding="ascii").strip()
         expected, filename = re.fullmatch(
@@ -414,6 +427,7 @@ def _verify_checksum(archive: Path, checksum: Path) -> None:
     if filename != archive.name:
         raise UpdateError("Release checksum names a different asset.")
     _verify_digest(archive, expected)
+    return expected.lower()
 
 
 def _verify_digest(archive: Path, expected: str) -> None:
@@ -432,7 +446,7 @@ def _download_verified(
     max_size: int,
     component: str,
     progress: ProgressCallback | None = None,
-) -> Path:
+) -> tuple[Path, str]:
     archive = directory / archive_name
     checksum = directory / f"{archive_name}.sha256"
     download_progress = None
@@ -449,8 +463,7 @@ def _download_verified(
     _download(_asset(release, checksum.name), checksum, 4096)
     if progress:
         progress(f"{component}_verify", None, None)
-    _verify_checksum(archive, checksum)
-    return archive
+    return archive, _verify_checksum(archive, checksum)
 
 
 def _download_custom_engine(
@@ -594,6 +607,29 @@ def _apply_custom_engine_profile(
     return profile
 
 
+def _write_engine_metadata(
+    source: Path, asset: CustomEngineAsset, profile: EngineProfile | None
+) -> None:
+    metadata = {
+        "schema": 2,
+        "repository": asset.repo,
+        "tag": asset.tag,
+        "asset": asset.name,
+        "url": asset.url,
+        "sha256": asset.sha256,
+        "installed_sha256": _installed_engine_hashes(source),
+    }
+    if profile:
+        metadata["profile"] = profile.identifier
+        metadata["capabilities"] = profile.capabilities()
+    metadata_path = source / CUSTOM_ENGINE_METADATA
+    metadata_path.unlink(missing_ok=True)
+    metadata_path.write_text(
+        json.dumps(metadata, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
 def _replace_directory(source: Path, destination: Path) -> Path:
     backup = destination.with_name(f"{destination.name}.previous")
     if backup.exists():
@@ -620,7 +656,7 @@ def install_installer_update(
         prefix=".installer-update.", dir=tool_root.parent
     ) as temporary:
         work = Path(temporary)
-        archive = _download_verified(
+        archive, _ = _download_verified(
             release, archive_name, work, 25_000_000, "installer", progress
         )
         if progress:
@@ -682,7 +718,7 @@ def install_engine_update(
         prefix=".engine-update.", dir=engine_parent
     ) as temporary:
         work = Path(temporary)
-        archive = _download_verified(
+        archive, sha256 = _download_verified(
             release, archive_name, work, 1_500_000_000, "engine", progress
         )
         if progress:
@@ -703,6 +739,18 @@ def install_engine_update(
             raise UpdateError("Engine release manifest is missing or invalid.") from exc
         if manifest.get("version") != release.tag:
             raise UpdateError("Engine manifest version does not match its release.")
+        profile = profile_for_release(release.tag)
+        if profile:
+            asset = CustomEngineAsset(
+                repo=ENGINE_REPO,
+                tag=release.tag,
+                name=archive_name,
+                url=_asset(release, archive_name),
+                sha256=sha256,
+            )
+            _write_engine_metadata(source, asset, profile)
+        else:
+            (source / CUSTOM_ENGINE_METADATA).unlink(missing_ok=True)
         destination = engine_parent / "GDK-Proton-mcbe-gdk"
         if destination.exists():
             backup = _replace_directory(source, destination)
@@ -746,24 +794,8 @@ def install_custom_engine(
         archive_root = _validate_custom_engine_archive(archive)
         _extract_archive(archive, work)
         source = work / archive_root
-        profile = _apply_custom_engine_profile(source, asset)
-        metadata = {
-            "schema": 2,
-            "repository": asset.repo,
-            "tag": asset.tag,
-            "asset": asset.name,
-            "url": asset.url,
-            "sha256": asset.sha256,
-            "installed_sha256": _installed_engine_hashes(source),
-        }
-        if profile:
-            metadata["profile"] = profile.identifier
-            metadata["capabilities"] = profile.capabilities()
-        metadata_path = source / CUSTOM_ENGINE_METADATA
-        metadata_path.unlink(missing_ok=True)
-        metadata_path.write_text(
-            json.dumps(metadata, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
+        _write_engine_metadata(
+            source, asset, _apply_custom_engine_profile(source, asset)
         )
         destination = engine_parent / "GDK-Proton-mcbe-gdk"
         if destination.exists():

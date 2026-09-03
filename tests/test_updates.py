@@ -17,6 +17,9 @@ os.environ.setdefault("MCBE_GDK_ROOT", "/tmp/mcbe-gdk-update-tests")
 from auth.engine_profiles import (  # noqa: E402
     EXPERIMENTAL_ENGINE_PROFILE,
     LUKAS_EXPERIMENTAL_PROFILE,
+    STABLE_ENGINE_PROFILE,
+    installed_engine_profile,
+    profile_for_asset,
 )
 
 from updates import (  # noqa: E402
@@ -38,6 +41,7 @@ from updates import (  # noqa: E402
     fetch_latest_release,
     fetch_release,
     fetch_release_tags,
+    engine_is_ready,
     is_newer,
     install_custom_engine,
     install_engine_update,
@@ -485,7 +489,7 @@ class UpdateTests(unittest.TestCase):
                 "updates.urlopen",
                 side_effect=[Response(data), Response(checksum)],
             ):
-                _download_verified(
+                archive, digest = _download_verified(
                     latest,
                     name,
                     root,
@@ -493,6 +497,8 @@ class UpdateTests(unittest.TestCase):
                     "installer",
                     lambda *event: events.append(event),
                 )
+            self.assertEqual(archive, root / name)
+            self.assertEqual(digest, hashlib.sha256(data).hexdigest())
             self.assertEqual(
                 events,
                 [
@@ -546,30 +552,71 @@ class UpdateTests(unittest.TestCase):
             with self.assertRaises(UpdateError):
                 fetch_release_tags(ENGINE_REPO)
 
+    def _engine_archive(self, root: Path, tag: str) -> Path:
+        archive = root / "engine.tar.gz"
+        files = {
+            "engine-manifest.json": json.dumps({"version": tag}).encode(),
+            "proton": b"#!/bin/sh\n",
+            "files/bin/wine": b"wine",
+            "files/bin/wineserver": b"wineserver",
+        }
+        with tarfile.open(archive, "w:gz") as bundle:
+            for name, payload in files.items():
+                info = tarfile.TarInfo(f"GDK-Proton-mcbe-gdk/{name}")
+                info.size = len(payload)
+                info.mode = 0o755
+                bundle.addfile(info, io.BytesIO(payload))
+        return archive
+
     def test_engine_install_bootstraps_missing_destination(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             selected = release(ENGINE_REPO, "v0.1.8")
-
-            archive = root / "engine.tar.gz"
-            manifest_payload = json.dumps({"version": selected.tag}).encode()
-            with tarfile.open(archive, "w:gz") as bundle:
-                info = tarfile.TarInfo(
-                    "GDK-Proton-mcbe-gdk/engine-manifest.json"
-                )
-                info.size = len(manifest_payload)
-                bundle.addfile(info, io.BytesIO(manifest_payload))
-
+            archive = self._engine_archive(root, selected.tag)
             with patch(
-                "updates._download_verified", return_value=archive
+                "updates._download_verified", return_value=(archive, "a" * 64)
             ):
                 install_engine_update(selected, root)
 
-            manifest = (
-                root
-                / "engine/GDK-Proton-mcbe-gdk/engine-manifest.json"
-            )
+            engine = root / "engine/GDK-Proton-mcbe-gdk"
+            manifest = engine / "engine-manifest.json"
             self.assertEqual(json.loads(manifest.read_text())["version"], selected.tag)
+            self.assertFalse((engine / ".mcbe-gdk-engine.json").exists())
+            self.assertEqual(read_engine_version(root), "v0.1.8")
+
+    def test_engine_install_records_stable_profile_from_v0_2_0(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            selected = release(ENGINE_REPO, "v0.2.0")
+            archive = self._engine_archive(root, selected.tag)
+            with patch(
+                "updates._download_verified", return_value=(archive, "B" * 64)
+            ):
+                install_engine_update(selected, root)
+
+            engine = root / "engine/GDK-Proton-mcbe-gdk"
+            metadata = json.loads((engine / ".mcbe-gdk-engine.json").read_text())
+            self.assertEqual(metadata["repository"], ENGINE_REPO)
+            self.assertEqual(metadata["tag"], "v0.2.0")
+            self.assertEqual(metadata["sha256"], "B" * 64)
+            self.assertEqual(metadata["profile"], STABLE_ENGINE_PROFILE.identifier)
+            self.assertIs(installed_engine_profile(root), STABLE_ENGINE_PROFILE)
+            self.assertEqual(read_engine_version(root), "v0.2.0")
+            self.assertTrue(engine_is_ready(root, "v0.2.0"))
+
+    def test_legacy_experimental_url_selection_tracks_latest(self):
+        url = (
+            f"https://github.com/{ENGINE_REPO}/releases/download/"
+            "v0.2.0-experimental/GDK-Proton-mcbe-gdk-v0.2.0-experimental.tar.gz"
+        )
+        self.assertEqual(normalize_engine_selection(url), "latest")
+        self.assertEqual(
+            profile_for_asset(ENGINE_REPO, "v0.2.0", "x.tar.gz", "c" * 64),
+            STABLE_ENGINE_PROFILE,
+        )
+        self.assertIsNone(
+            profile_for_asset(ENGINE_REPO, "v0.1.9", "x.tar.gz", "c" * 64)
+        )
 
     def test_switch_engine_installs_and_persists_selection(self):
         with tempfile.TemporaryDirectory() as temporary:
